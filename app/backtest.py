@@ -107,7 +107,8 @@ def _signal_side(candles, i, indicators, config):
     down = c["close"] < ema200[i] and ema50[i] < ema200[i]
 
     if config["slope_filter"]:
-        if i < 10:
+        # EMA200 needs 200 bars; its value 10 bars earlier may still be None.
+        if i < 10 or ema200[i - 10] is None:
             return None
         up = up and ema200[i] > ema200[i - 10]
         down = down and ema200[i] < ema200[i - 10]
