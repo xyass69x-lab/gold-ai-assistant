@@ -212,6 +212,7 @@ def run_backtest_report():
         if len(row[1]) >= MIN_TRAIN_TRADES_FOR_SELECTION
         and _metrics(row[1])["avg_r"] > 0
         and _metrics(row[1])["profit_factor"] is not None
+        and _metrics(row[1])["profit_factor"] > 1.0
     ]
     selected = max(
         eligible,
