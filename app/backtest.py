@@ -88,8 +88,8 @@ def run_backtest_report():
 
     if not trades:
         return (
-            f"📊 اختبار تاريخي XAU/USD — 30 دقيقة\\n"
-            f"الشموع المستخدمة: {len(candles)}\\n"
+            f"📊 اختبار تاريخي XAU/USD — 30 دقيقة\n"
+            f"الشموع المستخدمة: {len(candles)}\n"
             "لم تظهر فرص مطابقة لشروط الاستراتيجية في هذه العينة. هذا لا يثبت وجود عطل."
         )
 
@@ -106,15 +106,15 @@ def run_backtest_report():
     end_text = datetime.fromtimestamp(end, timezone.utc).strftime("%Y-%m-%d")
 
     return (
-        "📊 نتيجة الاختبار التاريخي — XAU/USD\\n"
-        "الإطار: 30 دقيقة | أفق الصفقة: 48 شمعة (حتى 24 ساعة)\\n"
-        f"الفترة التقريبية: {start_text} إلى {end_text}\\n"
-        f"عدد الصفقات غير المتداخلة: {total}\\n"
-        f"وصل TP1: {tp1_count} ({tp1_count / total:.1%})\\n"
-        f"وصل TP2: {tp2_count} ({tp2_count / total:.1%})\\n"
-        f"وقف قبل TP1: {sl_before} ({sl_before / total:.1%})\\n"
-        f"وقف بعد TP1 وقبل TP2: {sl_after}\\n"
-        f"لم يصل هدف أو وقف خلال 24 ساعة: {neither}\\n\\n"
+        "📊 نتيجة الاختبار التاريخي — XAU/USD\n"
+        "الإطار: 30 دقيقة | أفق الصفقة: 48 شمعة (حتى 24 ساعة)\n"
+        f"الفترة التقريبية: {start_text} إلى {end_text}\n"
+        f"عدد الصفقات غير المتداخلة: {total}\n"
+        f"وصل TP1: {tp1_count} ({tp1_count / total:.1%})\n"
+        f"وصل TP2: {tp2_count} ({tp2_count / total:.1%})\n"
+        f"وقف قبل TP1: {sl_before} ({sl_before / total:.1%})\n"
+        f"وقف بعد TP1 وقبل TP2: {sl_after}\n"
+        f"لم يصل هدف أو وقف خلال 24 ساعة: {neither}\n\n"
         "تنبيه: اختبار أولي فقط؛ لا يحتسب السبريد أو الانزلاق أو العمولة، "
         "وعند لمس الوقف والهدف في الشمعة نفسها يفترض الوقف أولاً. النتائج السابقة لا تضمن المستقبل."
     )
