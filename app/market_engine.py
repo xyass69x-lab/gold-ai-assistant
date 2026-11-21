@@ -11,7 +11,7 @@ INTERVAL = "30m"
 RANGE = "60d"
 TIMEFRAME_SECONDS = 30 * 60
 MIN_CLOSED_CANDLES = 220
-MAX_CANDLE_AGE_SECONDS = 72 * 60 * 60
+MAX_CANDLE_AGE_SECONDS = 90 * 60  # Reject signals when the latest completed 30m candle is over 90 minutes old
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; GoldAIAssistant/1.0)",
     "Accept": "application/json",
