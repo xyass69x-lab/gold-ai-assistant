@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import hashlib
 import math
 import os
 import sqlite3
@@ -165,7 +166,7 @@ def configure_telegram_webhook():
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{token}/setWebhook",
-            json={"url": url, "allowed_updates": ["message"], "drop_pending_updates": False},
+            json={"url": url, "allowed_updates": ["message"], "drop_pending_updates": False, "secret_token": hashlib.sha256(token.encode()).hexdigest()},
             timeout=15,
         )
         response.raise_for_status()
@@ -179,7 +180,9 @@ def configure_telegram_webhook():
 async def telegram_webhook(request: Request):
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     expected_chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not expected_chat:
+    expected_secret = hashlib.sha256(token.encode()).hexdigest() if token else ""
+    supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not token or not expected_chat or not hmac.compare_digest(supplied_secret, expected_secret):
         raise HTTPException(503, "Telegram configuration is incomplete")
     try:
         update = await request.json()
@@ -191,8 +194,8 @@ async def telegram_webhook(request: Request):
         text = str(message.get("text", "")).strip().lower()
         if text in ("/start", "/start@GoldAI_Yaser_bot"):
             reply = (
-                "مرحباً بك في Gold AI Assistant 🟡\\n"
-                "تم ربط المحادثة بنجاح. ستصلك هنا إشعارات إشارات الذهب عند توفرها.\\n"
+                "مرحباً بك في Gold AI Assistant 🟡\n"
+                "تم ربط المحادثة بنجاح. ستصلك هنا إشعارات إشارات الذهب عند توفرها.\n"
                 "الأوامر المتاحة: /status و /help"
             )
         elif text in ("/help", "/help@GoldAI_Yaser_bot"):
@@ -200,7 +203,7 @@ async def telegram_webhook(request: Request):
         elif text in ("/status", "/status@GoldAI_Yaser_bot"):
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
-            reply = f"حالة محرك الذهب: {state}\\n{detail}\\nالمصدر الحالي: GC=F عقود ذهب COMEX الآجلة، وليس السعر الفوري XAU/USD."
+            reply = f"حالة محرك الذهب: {state}\n{detail}\nالمصدر الحالي: GC=F عقود ذهب COMEX الآجلة، وليس السعر الفوري XAU/USD."
         elif text == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
         else:
