@@ -31,19 +31,24 @@ def _simulate_trade(candles, entry_index, side, entry, risk, horizon):
     last_index = min(entry_index + horizon, len(candles) - 1)
     for j in range(entry_index, last_index + 1):
         bar = candles[j]
+        # The live tracker applies the break-even stop from the candle AFTER
+        # TP1 is confirmed. Keep that same candle-by-candle transition here.
+        active_stop = entry if tp1_hit else stop
         if side == "BUY":
             sl_touched, tp1_touched, tp2_touched = (
-                bar["low"] <= stop, bar["high"] >= tp1, bar["high"] >= tp2
+                bar["low"] <= active_stop, bar["high"] >= tp1, bar["high"] >= tp2
             )
         else:
             sl_touched, tp1_touched, tp2_touched = (
-                bar["high"] >= stop, bar["low"] <= tp1, bar["low"] <= tp2
+                bar["high"] >= active_stop, bar["low"] <= tp1, bar["low"] <= tp2
             )
 
-        # If SL and target are both inside one OHLC candle, assume SL first.
+        # If the active stop and a target are both touched in one OHLC candle,
+        # assume the stop happened first. After TP1, half the position has
+        # already banked +1R, so a break-even exit on the remainder is +0.5R.
         if sl_touched:
             return {
-                "gross_r": 0.0 if tp1_hit else -1.0,
+                "gross_r": 0.5 if tp1_hit else -1.0,
                 "tp1": tp1_hit, "tp2": False,
                 "stop_before_tp1": not tp1_hit,
                 "stop_after_tp1": tp1_hit, "exit_index": j,
