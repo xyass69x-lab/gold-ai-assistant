@@ -35,16 +35,19 @@ class MarketEngineTests(unittest.TestCase):
 
     def test_analysis_uses_only_closed_candles(self):
         candles = self.make_candles(240)
-        now = candles[-1]["timestamp"] + 1800 + 1
+        expected_timestamp = candles[-1]["timestamp"]
+        now = expected_timestamp + 1800 + 1
         open_candle = dict(candles[-1])
         open_candle["timestamp"] = now
         open_candle["close"] += 100
         candles.append(open_candle)
 
         snapshot, signal = analyze_latest_closed_candle(candles, now=now)
-        self.assertEqual(snapshot["candle_at"], __import__("datetime").datetime.fromtimestamp(
-            candles[-1]["timestamp"] - 1800, __import__("datetime").timezone.utc
-        ).isoformat())
+        from datetime import datetime, timezone
+        self.assertEqual(
+            snapshot["candle_at"],
+            datetime.fromtimestamp(expected_timestamp, timezone.utc).isoformat(),
+        )
         self.assertIsNone(signal)
         self.assertIsNotNone(snapshot["ema200"])
         self.assertIsNotNone(snapshot["rsi14"])
