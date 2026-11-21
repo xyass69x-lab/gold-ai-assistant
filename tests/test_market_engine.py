@@ -9,6 +9,7 @@ from app.market_engine import (
     _atr,
     _ema,
     _parse_datetime,
+    _next_candle_open_for_entry,
     _rsi,
     analyze_latest_closed_candle,
 )
@@ -61,6 +62,32 @@ class MarketEngineTests(unittest.TestCase):
         now = candles[-1]["timestamp"] + TIMEFRAME_SECONDS + 91 * 60
         with self.assertRaises(MarketDataError):
             analyze_latest_closed_candle(candles, now=now)
+
+    def test_entry_uses_next_candle_open_only_while_it_is_forming(self):
+        closed = self.make_candles(220)[-1]
+        next_candle = {
+            "timestamp": closed["timestamp"] + TIMEFRAME_SECONDS,
+            "open": closed["close"] + 0.25,
+            "high": closed["close"] + 0.50,
+            "low": closed["close"] + 0.10,
+            "close": closed["close"] + 0.30,
+            "volume": 1,
+        }
+        now = next_candle["timestamp"] + 60
+        self.assertEqual(
+            _next_candle_open_for_entry(closed, [closed, next_candle], now),
+            next_candle["open"],
+        )
+        self.assertIsNone(
+            _next_candle_open_for_entry(
+                closed, [closed, next_candle], next_candle["timestamp"] + TIMEFRAME_SECONDS
+            )
+        )
+
+    def test_no_entry_when_next_candle_is_missing(self):
+        closed = self.make_candles(220)[-1]
+        now = closed["timestamp"] + TIMEFRAME_SECONDS + 60
+        self.assertIsNone(_next_candle_open_for_entry(closed, [closed], now))
 
     def test_analysis_uses_only_closed_candles(self):
         candles = self.make_candles(240)
