@@ -168,13 +168,15 @@ def analyze_latest_closed_candle(candles, now=None):
         entry = candle["close"]
         side = "BUY"
         stop = entry - 1.5 * atr[i]
-        target = entry + 3.0 * atr[i]
+        target_1 = entry + 1.5 * atr[i]
+        target_2 = entry + 3.0 * atr[i]
         reason = "اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI"
     elif sell:
         entry = candle["close"]
         side = "SELL"
         stop = entry + 1.5 * atr[i]
-        target = entry - 3.0 * atr[i]
+        target_1 = entry - 1.5 * atr[i]
+        target_2 = entry - 3.0 * atr[i]
         reason = "اتجاه هابط + إعادة اختبار EMA20 + زخم RSI"
     else:
         return snapshot, None
@@ -184,7 +186,8 @@ def analyze_latest_closed_candle(candles, now=None):
         "side": side,
         "entry": round(entry, 3),
         "stop_loss": round(stop, 3),
-        "take_profit": round(target, 3),
+        "take_profit_1": round(target_1, 3),
+        "take_profit": round(target_2, 3),
         "timeframe": "30m",
         "reason": reason,
     }
