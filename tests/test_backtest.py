@@ -17,10 +17,10 @@ class BacktestSimulationTests(unittest.TestCase):
         self.assertEqual(result["gross_r"], 1.5)
         self.assertTrue(result["tp2"])
 
-    def test_buy_tp1_then_stop_is_zero_r(self):
+    def test_buy_tp1_then_break_even_is_plus_half_r(self):
         candles = [self.bar(100.0, 101.1), self.bar(98.9, 100.5)]
         result = _simulate_trade(candles, 0, "BUY", 100.0, 1.0, 48)
-        self.assertEqual(result["gross_r"], 0.0)
+        self.assertEqual(result["gross_r"], 0.5)
         self.assertTrue(result["stop_after_tp1"])
 
     def test_sell_tp2_is_plus_one_point_five_r(self):
@@ -48,6 +48,24 @@ class BacktestSimulationTests(unittest.TestCase):
         )
         config = {"slope_filter": False, "rsi_buy": 55, "rsi_sell": 45, "body_atr": 0.0}
         self.assertIsNone(_signal_side(candles, 0, indicators, config))
+
+    def test_sell_tp1_then_break_even_is_plus_half_r(self):
+        candles = [self.bar(98.9, 100.0), self.bar(99.5, 101.1)]
+        result = _simulate_trade(candles, 0, "SELL", 100.0, 1.0, 48)
+        self.assertEqual(result["gross_r"], 0.5)
+        self.assertTrue(result["stop_after_tp1"])
+
+    def test_original_stop_wins_if_stop_and_tp1_touched_same_candle(self):
+        result = _simulate_trade([self.bar(98.9, 101.1)], 0, "BUY", 100.0, 1.0, 48)
+        self.assertEqual(result["gross_r"], -1.0)
+        self.assertFalse(result["tp1"])
+        self.assertTrue(result["stop_before_tp1"])
+
+    def test_tp1_and_tp2_same_candle_is_plus_one_point_five_r(self):
+        result = _simulate_trade([self.bar(99.5, 102.1)], 0, "BUY", 100.0, 1.0, 48)
+        self.assertEqual(result["gross_r"], 1.5)
+        self.assertTrue(result["tp1"])
+        self.assertTrue(result["tp2"])
 
 
 if __name__ == "__main__":
