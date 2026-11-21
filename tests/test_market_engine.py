@@ -1,6 +1,6 @@
 import unittest
 
-from app.market_engine import YAHOO_SYMBOL, _atr, _ema, _rsi, analyze_latest_closed_candle
+from app.market_engine import MarketDataError, YAHOO_SYMBOL, _atr, _ema, _rsi, analyze_latest_closed_candle
 
 
 class MarketEngineTests(unittest.TestCase):
@@ -35,6 +35,12 @@ class MarketEngineTests(unittest.TestCase):
         candles = self.make_candles(30)
         result = _atr(candles, 14)
         self.assertGreater(result[-1], 0)
+
+    def test_stale_market_candles_are_rejected(self):
+        candles = self.make_candles(240)
+        now = candles[-1]["timestamp"] + 1800 + 91 * 60
+        with self.assertRaises(MarketDataError):
+            analyze_latest_closed_candle(candles, now=now)
 
     def test_analysis_uses_only_closed_candles(self):
         candles = self.make_candles(240)
