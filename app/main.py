@@ -218,7 +218,7 @@ async def telegram_webhook(request: Request):
                 "الأوامر المتاحة: /status و /help"
             )
         elif command == "/help":
-            reply = "هذا البوت يرسل إشعارات تحليل الذهب فقط، ولا ينفذ صفقات. استخدم /status لفحص حالة المحرك."
+            reply = "هذا البوت يرسل إشعارات تحليل الذهب فقط، ولا ينفذ صفقات. الأوامر: /status للحالة، /backtest للاختبار التاريخي، /testalert لاختبار التنبيه."
         elif command == "/status":
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
@@ -236,8 +236,11 @@ async def telegram_webhook(request: Request):
                 if test_sent else f"❌ تعذر إرسال إشعار الاختبار: {test_note}"
             )
         elif command == "/backtest":
-            from app.backtest import run_backtest_report
-            reply = await asyncio.to_thread(run_backtest_report)
+            try:
+                from app.backtest import run_backtest_report
+                reply = await asyncio.to_thread(run_backtest_report)
+            except Exception as exc:
+                reply = f"⚠️ تعذر إكمال الاختبار التاريخي: {str(exc)[:250]}"
         else:
             return {"ok": True, "ignored": True}
         sent, note = telegram_send_to_chat(chat_id, reply)
