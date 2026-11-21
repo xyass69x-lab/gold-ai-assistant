@@ -13,22 +13,34 @@ h1{font-size:25px;margin:0}.muted{color:#9aa8bc}.pill{border:1px solid #315b48;c
 .value{font-size:23px;font-weight:bold;margin-top:10px;overflow-wrap:anywhere}.wide{margin-top:14px}.signal{font-size:18px;font-weight:bold}
 table{width:100%;border-collapse:collapse;margin-top:12px}td,th{text-align:right;padding:10px;border-bottom:1px solid #29384d;font-size:13px}
 .note{line-height:1.8;color:#c5cfdd;font-size:13px}.empty{padding:20px;color:#9aa8bc;text-align:center}
-.table-wrap{overflow-x:auto}
+.table-wrap{overflow-x:auto}.status-error{color:#ff8585}.status-ok{color:#7ee0aa}
+.indicators{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:12px}
+.indicator{background:#0b1220;border:1px solid #26364d;border-radius:10px;padding:10px;font-size:12px}
+.indicator b{display:block;font-size:15px;margin-top:5px;direction:ltr;text-align:right}
 </style></head>
 <body><main class="wrap">
 <div class="top"><div><h1>🟡 Gold AI Assistant</h1><div class="muted">مساعد إشارات الذهب — تنفيذ يدوي عبر XTB</div></div><span class="pill">وضع الإشارات فقط</span></div>
 <div class="grid">
 <div class="card"><div class="label">السوق</div><div class="value">XAU/USD</div></div>
 <div class="card"><div class="label">رأس المال المرجعي</div><div class="value">$100</div></div>
-<div class="card"><div class="label">آخر حالة</div><div class="value" id="state">بانتظار البيانات</div></div>
+<div class="card"><div class="label">حالة المحرك</div><div class="value" id="engineState" style="font-size:17px">جارٍ التهيئة</div></div>
 <div class="card"><div class="label">آخر تحديث</div><div class="value" id="updated" style="font-size:14px">—</div></div>
+<div class="card"><div class="label">آخر إغلاق 30 دقيقة</div><div class="value" id="enginePrice" style="font-size:19px">—</div></div>
+<div class="card"><div class="label">إشعارات تنتظر الإرسال</div><div class="value" id="pending">—</div></div>
 </div>
+<section class="card wide note"><b>مصدر البيانات:</b> <span id="engineSource">Yahoo Finance chart (غير رسمي)</span><br><span id="engineDetail">يتم الاتصال بمصدر بيانات الذهب</span><br><span id="engineCandle">وقت الشمعة: —</span><br><span id="engineError" class="status-error"></span>
+<div class="indicators">
+<div class="indicator">EMA 20<b id="ema20">—</b></div><div class="indicator">EMA 50<b id="ema50">—</b></div><div class="indicator">EMA 200<b id="ema200">—</b></div><div class="indicator">RSI 14<b id="rsi14">—</b></div><div class="indicator">ATR 14<b id="atr14">—</b></div>
+</div></section>
 <section class="card wide"><div class="signal">آخر إشارة</div><div id="latest" class="empty">لم تصل أي إشارة بعد. لا يتم اختلاق أسعار مباشرة.</div></section>
-<section class="card wide"><div class="signal">سجل الإشارات</div><div class="table-wrap"><table><thead><tr><th>النوع</th><th>الدخول</th><th>الوقف</th><th>الهدف</th><th>R:R</th></tr></thead><tbody id="history"><tr><td colspan="5" class="empty">لا توجد بيانات</td></tr></tbody></table></div></section>
-<section class="card wide note">تنبيه: هذه لوحة تستقبل إشارات TradingView وتتحقق من ترتيب الأسعار ونسبة العائد إلى المخاطرة. لا تمثل توصية استثمارية، ولا تتصل بحساب XTB ولا تنفذ صفقات. اختبرها على بيانات تجريبية قبل استخدامها.</section>
+<section class="card wide"><div class="signal">سجل الإشارات</div><div class="table-wrap"><table><thead><tr><th>النوع</th><th>الدخول</th><th>الوقف</th><th>TP1</th><th>TP2</th><th>R:R</th><th>Telegram</th></tr></thead><tbody id="history"><tr><td colspan="7" class="empty">لا توجد بيانات</td></tr></tbody></table></div></section>
+<section class="card wide note">تنبيه: هذه لوحة إشارات تحليلية فقط. لا تتصل بحساب XTB ولا تنفذ صفقات. سعر الدخول هو إغلاق الشمعة المكتملة وقد يختلف عن السعر الحالي عند وصول الإشعار. اختبر الأداء على بيانات تاريخية وحساب تجريبي قبل استخدام أموال حقيقية.</section>
 </main>
 <script>
 const byId = id => document.getElementById(id);
+function fmt(value) {
+  return value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toFixed(3);
+}
 function cell(row, value) {
   const td = document.createElement('td');
   td.textContent = value == null ? '—' : String(value);
@@ -40,12 +52,12 @@ function renderHistory(items) {
   if (!items || !items.length) {
     const row = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 5; td.className = 'empty'; td.textContent = 'لا توجد بيانات';
+    td.colSpan = 7; td.className = 'empty'; td.textContent = 'لا توجد بيانات';
     row.appendChild(td); body.appendChild(row); return;
   }
   items.forEach(s => {
     const row = document.createElement('tr');
-    [s.side, s.entry, s.stop_loss, s.take_profit, `1:${s.rr}`].forEach(v => cell(row, v));
+    [s.side, fmt(s.entry), fmt(s.stop_loss), fmt(s.take_profit_1), fmt(s.take_profit), '1:' + fmt(s.rr), s.telegram ? 'تم الإرسال' : 'بانتظار الإرسال'].forEach(v => cell(row, v));
     body.appendChild(row);
   });
 }
@@ -55,16 +67,28 @@ async function refresh() {
     if (!response.ok) throw new Error('status request failed');
     const data = await response.json();
     const signal = data.latest || {};
-    byId('state').textContent = signal.status === 'signal' ? signal.message : 'بانتظار الإشارات';
-    byId('updated').textContent = signal.updated ? new Date(signal.updated).toLocaleString('ar') : '—';
+    const engine = data.engine || {};
+    const online = engine.status === 'online';
+    byId('engineState').textContent = online ? 'متصل' : engine.status === 'error' ? 'تعذر الاتصال' : 'جارٍ التهيئة';
+    byId('engineState').className = 'value ' + (online ? 'status-ok' : 'status-error');
+    byId('enginePrice').textContent = fmt(engine.price);
+    byId('engineSource').textContent = engine.source || 'غير محدد';
+    byId('engineDetail').textContent = engine.message || 'بانتظار حالة المحرك';
+    byId('engineCandle').textContent = 'وقت آخر شمعة مغلقة: ' + (engine.last_candle || '—');
+    byId('engineError').textContent = engine.last_error ? 'تفاصيل الخطأ: ' + engine.last_error : '';
+    byId('pending').textContent = data.notifications_pending == null ? '—' : data.notifications_pending;
+    const indicators = engine.indicators || {};
+    ['ema20','ema50','ema200','rsi14','atr14'].forEach(key => byId(key).textContent = fmt(indicators[key]));
+    byId('updated').textContent = engine.last_checked ? new Date(engine.last_checked).toLocaleString('ar') : '—';
     const latest = byId('latest');
     latest.textContent = signal.status === 'signal'
-      ? `${signal.message} | دخول ${signal.entry} | وقف ${signal.stop_loss} | هدف ${signal.take_profit} | R:R 1:${signal.rr} | ${signal.reason || ''}`
+      ? signal.message + ' | دخول ' + fmt(signal.entry) + ' | وقف ' + fmt(signal.stop_loss) + ' | TP1 ' + fmt(signal.take_profit_1) + ' | TP2 ' + fmt(signal.take_profit) + ' | R:R 1:' + fmt(signal.rr)
       : 'لم تصل أي إشارة بعد. لا يتم اختلاق أسعار مباشرة.';
     latest.className = signal.status === 'signal' ? '' : 'empty';
     renderHistory(data.history || []);
   } catch (error) {
-    byId('state').textContent = 'غير متصل';
+    byId('engineState').textContent = 'غير متصل';
+    byId('engineError').textContent = 'تعذر قراءة حالة الخادم';
   }
 }
 refresh();
