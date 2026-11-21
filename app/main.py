@@ -235,6 +235,9 @@ async def telegram_webhook(request: Request):
                 "✅ تم إرسال إشعار الاختبار إلى المحادثات المسجلة."
                 if test_sent else f"❌ تعذر إرسال إشعار الاختبار: {test_note}"
             )
+        elif command == "/backtest":
+            from app.backtest import run_backtest_report
+            reply = await asyncio.to_thread(run_backtest_report)
         else:
             return {"ok": True, "ignored": True}
         sent, note = telegram_send_to_chat(chat_id, reply)
