@@ -1,9 +1,12 @@
 import unittest
 
-from app.market_engine import _atr, _ema, _rsi, analyze_latest_closed_candle
+from app.market_engine import YAHOO_SYMBOL, _atr, _ema, _rsi, analyze_latest_closed_candle
 
 
 class MarketEngineTests(unittest.TestCase):
+    def test_yahoo_gold_symbol_uses_comex_future_proxy(self):
+        self.assertEqual(YAHOO_SYMBOL, "GC=F")
+
     def make_candles(self, count=240, start=1_700_000_000):
         candles = []
         for index in range(count):
