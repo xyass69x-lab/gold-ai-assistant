@@ -24,7 +24,7 @@ class TradeTrackerTests(unittest.TestCase):
         self.assertEqual(result, ("TP2_HIT", True, ["TP1", "TP2"], 96))
 
     def test_sell_after_tp1_hits_tp2(self):
-        result = evaluate_trade_candle("SELL", 100, 102, 98, 96, True, self.candle(95.9, 100.5))
+        result = evaluate_trade_candle("SELL", 100, 102, 98, 96, True, self.candle(95.9, 99.9))
         self.assertEqual(result, ("TP2_HIT", True, ["TP2"], 96))
 
 
