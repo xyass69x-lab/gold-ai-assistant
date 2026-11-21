@@ -28,13 +28,13 @@ table{width:100%;border-collapse:collapse;margin-top:12px}td,th{text-align:right
 <div class="card"><div class="label">آخر إغلاق 30 دقيقة</div><div class="value" id="enginePrice" style="font-size:19px">—</div></div>
 <div class="card"><div class="label">إشعارات تنتظر الإرسال</div><div class="value" id="pending">—</div></div>
 </div>
-<section class="card wide note"><b>مصدر البيانات:</b> <span id="engineSource">Yahoo Finance chart (غير رسمي)</span><br><span id="engineDetail">يتم الاتصال بمصدر بيانات الذهب</span><br><span id="engineCandle">وقت الشمعة: —</span><br><span id="engineError" class="status-error"></span>
+<section class="card wide note"><b>مصدر البيانات:</b> <span id="engineSource">Yahoo Finance GC=F — عقود ذهب COMEX الآجلة (بديل تقريبي وليس سعر الذهب الفوري)</span><br><span id="engineDetail">يتم الاتصال بمصدر بيانات الذهب</span><br><span id="engineCandle">وقت الشمعة: —</span><br><span id="engineError" class="status-error"></span>
 <div class="indicators">
 <div class="indicator">EMA 20<b id="ema20">—</b></div><div class="indicator">EMA 50<b id="ema50">—</b></div><div class="indicator">EMA 200<b id="ema200">—</b></div><div class="indicator">RSI 14<b id="rsi14">—</b></div><div class="indicator">ATR 14<b id="atr14">—</b></div>
 </div></section>
 <section class="card wide"><div class="signal">آخر إشارة</div><div id="latest" class="empty">لم تصل أي إشارة بعد. لا يتم اختلاق أسعار مباشرة.</div></section>
 <section class="card wide"><div class="signal">سجل الإشارات</div><div class="table-wrap"><table><thead><tr><th>النوع</th><th>الدخول</th><th>الوقف</th><th>TP1</th><th>TP2</th><th>R:R</th><th>Telegram</th></tr></thead><tbody id="history"><tr><td colspan="7" class="empty">لا توجد بيانات</td></tr></tbody></table></div></section>
-<section class="card wide note">تنبيه: هذه لوحة إشارات تحليلية فقط. لا تتصل بحساب XTB ولا تنفذ صفقات. سعر الدخول هو إغلاق الشمعة المكتملة وقد يختلف عن السعر الحالي عند وصول الإشعار. اختبر الأداء على بيانات تاريخية وحساب تجريبي قبل استخدام أموال حقيقية.</section>
+<section class="card wide note">تنبيه مهم: مصدر السعر GC=F هو عقد ذهب COMEX الآجل وليس XAU/USD الفوري؛ قد يوجد فرق بين السعرين. هذه لوحة إشارات تحليلية فقط ولا تتصل بحساب XTB ولا تنفذ صفقات. سعر الدخول هو إغلاق الشمعة المكتملة وقد يختلف عن السعر الحالي عند وصول الإشعار. اختبر الأداء على بيانات تاريخية وحساب تجريبي قبل استخدام أموال حقيقية.</section>
 </main>
 <script>
 const byId = id => document.getElementById(id);
