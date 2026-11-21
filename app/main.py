@@ -225,6 +225,16 @@ async def telegram_webhook(request: Request):
             reply = f"حالة محرك الذهب: {state}\n{detail}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
         elif text.lower() == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
+        elif command == "/testalert":
+            test_sent, test_note = telegram_send(
+                "🧪 اختبار تجريبي لإشعارات Gold AI Assistant\n"
+                "هذه رسالة اختبار فقط وليست توصية تداول.\n"
+                "لا توجد صفقة حقيقية أو دخول أو أهداف في هذا الاختبار."
+            )
+            reply = (
+                "✅ تم إرسال إشعار الاختبار إلى المحادثات المسجلة."
+                if test_sent else f"❌ تعذر إرسال إشعار الاختبار: {test_note}"
+            )
         else:
             return {"ok": True, "ignored": True}
         sent, note = telegram_send_to_chat(chat_id, reply)
