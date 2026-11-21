@@ -179,16 +179,16 @@ def telegram_send(message: str):
 
 def _signal_message(signal: Signal, rr: float, source: str):
     return (
-        "🟡 GOLD AI ASSISTANT — تحليل مستقل\\n"
-        f"إشارة {signal.side.upper()} — XAU/USD\\n"
-        f"الإطار: {signal.timeframe}\\n"
-        f"الدخول المرجعي: {signal.entry}\\n"
-        f"وقف الخسارة: {signal.stop_loss}\\n"
-        f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\\n"
-        f"TP2: {signal.take_profit}\\n"
-        f"العائد/المخاطرة: 1:{rr:.2f}\\n"
-        f"السبب: {signal.reason}\\n"
-        f"المصدر: {source}\\n"
+        "🟡 GOLD AI ASSISTANT — تحليل مستقل\n"
+        f"إشارة {signal.side.upper()} — XAU/USD\n"
+        f"الإطار: {signal.timeframe}\n"
+        f"الدخول المرجعي: {signal.entry}\n"
+        f"وقف الخسارة: {signal.stop_loss}\n"
+        f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\n"
+        f"TP2: {signal.take_profit}\n"
+        f"العائد/المخاطرة: 1:{rr:.2f}\n"
+        f"السبب: {signal.reason}\n"
+        f"المصدر: {source}\n"
         "تنبيه: الإشارة تحليلية وليست ضماناً للربح؛ تحقق من السعر الحالي والسبريد قبل التنفيذ."
     )
 
