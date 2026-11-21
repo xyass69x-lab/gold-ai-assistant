@@ -268,7 +268,7 @@ def save_signal(item: dict):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             item["symbol"], item["side"], item["entry"], item["stop_loss"],
-            item["take_profit"], item["timeframe"], item["reason"],
+            item["take_profit"], item.get("take_profit_1"), item["timeframe"], item["reason"],
             item["rr"], item["updated"], int(item["telegram"])
         ))
         conn.commit()
