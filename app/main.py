@@ -229,9 +229,17 @@ def persist_engine_result(candle_at: str, signal: Optional[Signal], rr: Optional
 
 def deliver_pending_notifications(limit: int = 10):
     with closing(_db()) as conn:
+        # Never send alerts for a candle that is no longer actionable.
+        conn.execute("""
+            UPDATE notification_outbox
+            SET sent=1, last_error='expired: market candle older than 90 minutes'
+            WHERE sent=0 AND datetime(candle_at) < datetime('now', '-90 minutes')
+        """)
+        conn.commit()
         pending = conn.execute("""
             SELECT id, signal_id, message FROM notification_outbox
-            WHERE sent=0 ORDER BY id LIMIT ?
+            WHERE sent=0 AND datetime(candle_at) >= datetime('now', '-90 minutes')
+            ORDER BY id LIMIT ?
         """, (limit,)).fetchall()
 
     for outbox_id, signal_id, message in pending:
@@ -334,8 +342,14 @@ def dashboard():
 
 @app.get("/api/status")
 def status():
+    latest = LATEST
+    if ENGINE_STATE["status"] != "online":
+        latest = {
+            "status": "waiting",
+            "message": "لا توجد إشارة حديثة؛ بيانات السوق قديمة أو السوق مغلق",
+        }
     return {
-        "latest": LATEST,
+        "latest": latest,
         "history": HISTORY[:10],
         "mode": "autonomous_signals_only",
         "engine": ENGINE_STATE,
