@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import math
 import os
@@ -12,6 +13,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
+
+from app.market_engine import analyze_latest_closed_candle, fetch_candles
 
 load_dotenv()
 
@@ -55,6 +58,13 @@ def init_db():
                 updated TEXT NOT NULL, telegram INTEGER NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS processed_candles (
+                symbol TEXT NOT NULL, timeframe TEXT NOT NULL,
+                candle_at TEXT NOT NULL,
+                PRIMARY KEY (symbol, timeframe, candle_at)
+            )
+        """)
         conn.commit()
 
 
@@ -78,6 +88,115 @@ def load_history():
 
 init_db()
 load_history()
+
+ENGINE_STATE = {
+    "status": "starting",
+    "message": "يتم تهيئة محرك تحليل الذهب",
+    "source": "Yahoo Finance chart (unofficial)",
+    "timeframe": "30m",
+    "price": None,
+    "last_candle": None,
+    "last_checked": None,
+    "last_error": None,
+}
+ENGINE_TASK = None
+ENGINE_POLL_SECONDS = max(120, int(os.getenv("ENGINE_POLL_SECONDS", "180")))
+
+
+def candle_was_processed(candle_at: str) -> bool:
+    with closing(_db()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM processed_candles WHERE symbol=? AND timeframe=? AND candle_at=?",
+            ("XAUUSD", "30m", candle_at),
+        ).fetchone()
+    return row is not None
+
+
+def mark_candle_processed(candle_at: str):
+    with closing(_db()) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO processed_candles(symbol,timeframe,candle_at) VALUES(?,?,?)",
+            ("XAUUSD", "30m", candle_at),
+        )
+        conn.commit()
+
+
+def run_engine_once():
+    global ENGINE_STATE, HISTORY, LATEST
+    candles = fetch_candles()
+    snapshot, raw_signal = analyze_latest_closed_candle(candles)
+    ENGINE_STATE = {
+        "status": "online",
+        "message": "محرك التحليل يعمل — بانتظار تحقق شروط الإشارة" if not raw_signal else f"تم رصد إشارة {raw_signal['side']}",
+        "source": snapshot["source"],
+        "timeframe": snapshot["timeframe"],
+        "price": snapshot["price"],
+        "last_candle": snapshot["candle_at"],
+        "last_checked": snapshot["checked_at"],
+        "last_error": None,
+        "indicators": {k: snapshot[k] for k in ("ema20", "ema50", "ema200", "rsi14", "atr14")},
+    }
+    candle_at = snapshot["candle_at"]
+    if candle_was_processed(candle_at):
+        return
+
+    mark_candle_processed(candle_at)
+    if not raw_signal:
+        return
+
+    signal = Signal(**raw_signal)
+    rr = validate_signal(signal)
+    now = datetime.now(timezone.utc).isoformat()
+    message = (
+        "🟡 GOLD AI ASSISTANT — تحليل مستقل\n"
+        f"إشارة {signal.side} — XAU/USD\n"
+        f"الإطار: {signal.timeframe}\n"
+        f"الدخول: {signal.entry}\nوقف الخسارة: {signal.stop_loss}\n"
+        f"الهدف: {signal.take_profit}\nالعائد/المخاطرة: 1:{rr:.2f}\n"
+        f"السبب: {signal.reason}\nالمصدر: Yahoo Finance (غير رسمي)"
+    )
+    sent, _ = telegram_send(message)
+    item = {
+        "symbol": "XAUUSD", "side": signal.side, "entry": signal.entry,
+        "stop_loss": signal.stop_loss, "take_profit": signal.take_profit,
+        "timeframe": signal.timeframe, "reason": signal.reason,
+        "rr": round(rr, 2), "updated": now, "telegram": sent,
+    }
+    save_signal(item)
+    HISTORY.insert(0, item)
+    del HISTORY[MAX_HISTORY:]
+    LATEST.clear()
+    LATEST.update({"status": "signal", "message": f"{signal.side} XAU/USD", **item})
+
+
+async def engine_loop():
+    while True:
+        try:
+            await asyncio.to_thread(run_engine_once)
+        except Exception as exc:
+            ENGINE_STATE.update({
+                "status": "error",
+                "message": "تعذر تحديث بيانات الذهب — سيُعاد المحاولة تلقائياً",
+                "last_error": str(exc)[:300],
+                "last_checked": datetime.now(timezone.utc).isoformat(),
+            })
+        await asyncio.sleep(ENGINE_POLL_SECONDS)
+
+
+@app.on_event("startup")
+async def start_engine():
+    global ENGINE_TASK
+    ENGINE_TASK = asyncio.create_task(engine_loop())
+
+
+@app.on_event("shutdown")
+async def stop_engine():
+    if ENGINE_TASK:
+        ENGINE_TASK.cancel()
+        try:
+            await ENGINE_TASK
+        except asyncio.CancelledError:
+            pass
 
 
 def validate_signal(s: Signal) -> float:
@@ -152,7 +271,12 @@ def dashboard():
 
 @app.get("/api/status")
 def status():
-    return {"latest": LATEST, "history": HISTORY[:10], "mode": "signals_only"}
+    return {
+        "latest": LATEST,
+        "history": HISTORY[:10],
+        "mode": "autonomous_signals_only",
+        "engine": ENGINE_STATE,
+    }
 
 
 @app.post("/webhook/{token}")
@@ -208,4 +332,4 @@ async def tradingview_webhook(token: str, request: Request):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "Gold AI Assistant", "version": "0.2.0"}
+    return {"ok": True, "service": "Gold AI Assistant", "version": "0.3.0", "engine": ENGINE_STATE["status"]}
