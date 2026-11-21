@@ -33,7 +33,8 @@ class Signal(BaseModel):
     side: str = Field(min_length=3, max_length=4)
     entry: float = Field(gt=0)
     stop_loss: float = Field(gt=0)
-    take_profit: float = Field(gt=0)
+    take_profit: float = Field(gt=0)  # TP2 (RR >= 1:2)
+    take_profit_1: Optional[float] = Field(default=None, gt=0)  # TP1 (RR 1:1)
     timeframe: str = Field(default="5m", min_length=1, max_length=12)
     reason: str = Field(default="إشارة من استراتيجية TradingView", max_length=500)
     confidence: Optional[int] = Field(default=None, ge=0, le=100)
@@ -53,7 +54,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL, side TEXT NOT NULL,
                 entry REAL NOT NULL, stop_loss REAL NOT NULL,
-                take_profit REAL NOT NULL, timeframe TEXT NOT NULL,
+                take_profit REAL NOT NULL, take_profit_1 REAL, timeframe TEXT NOT NULL,
                 reason TEXT NOT NULL, rr REAL NOT NULL,
                 updated TEXT NOT NULL, telegram INTEGER NOT NULL
             )
@@ -65,6 +66,9 @@ def init_db():
                 PRIMARY KEY (symbol, timeframe, candle_at)
             )
         """)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+        if "take_profit_1" not in columns:
+            conn.execute("ALTER TABLE signals ADD COLUMN take_profit_1 REAL")
         conn.commit()
 
 
@@ -72,12 +76,12 @@ def load_history():
     global HISTORY, LATEST
     with closing(_db()) as conn:
         rows = conn.execute("""
-            SELECT symbol, side, entry, stop_loss, take_profit,
+            SELECT symbol, side, entry, stop_loss, take_profit, take_profit_1,
                    timeframe, reason, rr, updated, telegram
             FROM signals ORDER BY id DESC LIMIT ?
         """, (MAX_HISTORY,)).fetchall()
     HISTORY = [
-        dict(zip(("symbol", "side", "entry", "stop_loss", "take_profit",
+        dict(zip(("symbol", "side", "entry", "stop_loss", "take_profit", "take_profit_1",
                   "timeframe", "reason", "rr", "updated", "telegram"), row))
         for row in rows
     ]
@@ -152,13 +156,15 @@ def run_engine_once():
         f"إشارة {signal.side} — XAU/USD\n"
         f"الإطار: {signal.timeframe}\n"
         f"الدخول: {signal.entry}\nوقف الخسارة: {signal.stop_loss}\n"
-        f"الهدف: {signal.take_profit}\nالعائد/المخاطرة: 1:{rr:.2f}\n"
+        f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\n"
+        f"TP2: {signal.take_profit}\nالعائد/المخاطرة: 1:{rr:.2f}\n"
         f"السبب: {signal.reason}\nالمصدر: Yahoo Finance (غير رسمي)"
     )
     sent, _ = telegram_send(message)
     item = {
         "symbol": "XAUUSD", "side": signal.side, "entry": signal.entry,
         "stop_loss": signal.stop_loss, "take_profit": signal.take_profit,
+        "take_profit_1": signal.take_profit_1,
         "timeframe": signal.timeframe, "reason": signal.reason,
         "rr": round(rr, 2), "updated": now, "telegram": sent,
     }
@@ -207,7 +213,7 @@ def validate_signal(s: Signal) -> float:
     if side not in ("BUY", "SELL"):
         raise HTTPException(400, "side must be BUY or SELL")
 
-    prices = (s.entry, s.stop_loss, s.take_profit)
+    prices = (s.entry, s.stop_loss, s.take_profit) + ((s.take_profit_1,) if s.take_profit_1 is not None else ())
     if not all(math.isfinite(v) and v > 0 for v in prices):
         raise HTTPException(400, "يجب أن تكون جميع الأسعار أرقاماً موجبة وصالحة")
 
@@ -215,6 +221,12 @@ def validate_signal(s: Signal) -> float:
         raise HTTPException(400, "ترتيب أسعار الشراء غير صحيح")
     if side == "SELL" and not (s.take_profit < s.entry < s.stop_loss):
         raise HTTPException(400, "ترتيب أسعار البيع غير صحيح")
+
+    if s.take_profit_1 is not None:
+        if side == "BUY" and not (s.entry < s.take_profit_1 < s.take_profit):
+            raise HTTPException(400, "ترتيب أهداف الشراء غير صحيح")
+        if side == "SELL" and not (s.take_profit < s.take_profit_1 < s.entry):
+            raise HTTPException(400, "ترتيب أهداف البيع غير صحيح")
 
     risk = abs(s.entry - s.stop_loss)
     reward = abs(s.take_profit - s.entry)
@@ -250,9 +262,9 @@ def save_signal(item: dict):
     with closing(_db()) as conn:
         conn.execute("""
             INSERT INTO signals
-            (symbol, side, entry, stop_loss, take_profit, timeframe,
+            (symbol, side, entry, stop_loss, take_profit, take_profit_1, timeframe,
              reason, rr, updated, telegram)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             item["symbol"], item["side"], item["entry"], item["stop_loss"],
             item["take_profit"], item["timeframe"], item["reason"],
