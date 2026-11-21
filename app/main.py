@@ -188,7 +188,8 @@ async def telegram_webhook(request: Request):
         message = update.get("message") or {}
         chat = message.get("chat") or {}
         chat_id = str(chat.get("id", ""))
-        if not chat_id or chat_id != expected_chat:
+        # Telegram chat IDs are learned from incoming updates; do not require a preconfigured chat ID for /start.
+        if not chat_id:
             return {"ok": True, "ignored": True}
         text = str(message.get("text", "")).strip().lower()
         if text in ("/start", "/start@GoldAI_Yaser_bot"):
