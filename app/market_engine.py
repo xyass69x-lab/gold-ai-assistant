@@ -148,8 +148,19 @@ def _atr(candles, period=14):
     return result
 
 
+def _next_candle_open_for_entry(closed_candle, ordered_candles, now):
+    """Return the next 30m candle open only while that candle is still forming."""
+    next_timestamp = closed_candle["timestamp"] + TIMEFRAME_SECONDS
+    for candidate in ordered_candles:
+        if candidate["timestamp"] == next_timestamp:
+            if candidate["timestamp"] <= now < candidate["timestamp"] + TIMEFRAME_SECONDS:
+                return candidate["open"]
+            return None
+    return None
+
+
 def analyze_latest_closed_candle(candles, now=None):
-    """Analyze only completed spot XAU/USD candles; never use the live candle."""
+    """Analyze completed candles and reference entry to the next candle open."""
     now = time.time() if now is None else now
     ordered = sorted(candles, key=lambda candle: candle["timestamp"])
     closed = [
@@ -206,19 +217,23 @@ def analyze_latest_closed_candle(candles, now=None):
     )
 
     if buy:
-        entry = candle["close"]
+        entry = _next_candle_open_for_entry(candle, ordered, now)
+        if entry is None:
+            return snapshot, None
         side = "BUY"
         stop = entry - 1.5 * atr[i]
         target_1 = entry + 1.5 * atr[i]
         target_2 = entry + 3.0 * atr[i]
-        reason = "اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI"
+        reason = "اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI؛ الدخول المرجعي افتتاح الشمعة التالية"
     elif sell:
-        entry = candle["close"]
+        entry = _next_candle_open_for_entry(candle, ordered, now)
+        if entry is None:
+            return snapshot, None
         side = "SELL"
         stop = entry + 1.5 * atr[i]
         target_1 = entry - 1.5 * atr[i]
         target_2 = entry - 3.0 * atr[i]
-        reason = "اتجاه هابط + إعادة اختبار EMA20 + زخم RSI"
+        reason = "اتجاه هابط + إعادة اختبار EMA20 + زخم RSI؛ الدخول المرجعي افتتاح الشمعة التالية"
     else:
         return snapshot, None
 
