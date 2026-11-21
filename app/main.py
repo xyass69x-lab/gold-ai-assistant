@@ -144,8 +144,8 @@ def run_engine_once():
     if candle_was_processed(candle_at):
         return
 
-    mark_candle_processed(candle_at)
     if not raw_signal:
+        mark_candle_processed(candle_at)
         return
 
     signal = Signal(**raw_signal)
@@ -173,6 +173,7 @@ def run_engine_once():
     del HISTORY[MAX_HISTORY:]
     LATEST.clear()
     LATEST.update({"status": "signal", "message": f"{signal.side} XAU/USD", **item})
+    mark_candle_processed(candle_at)
 
 
 async def engine_loop():
@@ -318,7 +319,8 @@ async def tradingview_webhook(token: str, request: Request):
         f"الإطار: {signal.timeframe}\n"
         f"الدخول: {signal.entry}\n"
         f"وقف الخسارة: {signal.stop_loss}\n"
-        f"الهدف: {signal.take_profit}\n"
+        f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\n"
+        f"TP2: {signal.take_profit}\n"
         f"العائد/المخاطرة: 1:{rr:.2f}\n"
         f"السبب: {signal.reason}\n\n"
         "⚠️ تنبيه تحليلي فقط — راجع السعر والسبريد وحجم العقد في XTB قبل أي تنفيذ. لا يوجد ضمان للربح."
@@ -328,6 +330,7 @@ async def tradingview_webhook(token: str, request: Request):
         "symbol": signal.symbol.upper().replace("/", ""),
         "side": side, "entry": signal.entry,
         "stop_loss": signal.stop_loss, "take_profit": signal.take_profit,
+        "take_profit_1": signal.take_profit_1,
         "timeframe": signal.timeframe, "reason": signal.reason,
         "rr": round(rr, 2), "updated": now, "telegram": sent,
     }
