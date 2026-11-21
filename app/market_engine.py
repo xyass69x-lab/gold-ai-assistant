@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import requests
 
-YAHOO_SYMBOL = "XAUUSD=X"
+YAHOO_SYMBOL = "GC=F"
 INTERVAL = "30m"
 # Yahoo intraday intervals are generally limited to a rolling 60-day window.
 RANGE = "60d"
@@ -23,8 +23,8 @@ class MarketDataError(Exception):
 
 
 def fetch_candles():
-    """Fetch XAU/USD 30m candles from Yahoo's unofficial chart endpoint."""
-    symbol = quote(YAHOO_SYMBOL, safe="")
+    """Fetch COMEX gold futures 30m candles as a clearly-labelled XAU/USD proxy."""
+    symbol = quote(YAHOO_SYMBOL, safe="=")
     params = {"range": RANGE, "interval": INTERVAL, "events": "history"}
     last_error = None
 
@@ -178,7 +178,7 @@ def analyze_latest_closed_candle(candles, now=None):
 
     snapshot = {
         "symbol": "XAUUSD",
-        "source": "Yahoo Finance chart (unofficial)",
+        "source": "Yahoo Finance GC=F COMEX gold futures (proxy; not spot XAU/USD)",
         "timeframe": "30m",
         "price": candle["close"],
         "candle_at": datetime.fromtimestamp(candle["timestamp"], timezone.utc).isoformat(),
