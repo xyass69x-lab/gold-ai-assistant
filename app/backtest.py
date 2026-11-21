@@ -101,17 +101,26 @@ def _metrics(trades):
 def _signal_side(candles, i, indicators, config):
     ema20, ema50, ema200, rsi, atr = indicators
     c = candles[i]
-    if any(series[i] is None for series in indicators) or atr[i] <= 0:
+
+    # Explicitly validate every indicator used in comparisons. Early indicator
+    # warm-up values are None by design and must never reach numeric operators.
+    current_values = (ema20[i], ema50[i], ema200[i], rsi[i], atr[i])
+    if not all(isinstance(value, (int, float)) for value in current_values):
         return None
+    if atr[i] <= 0:
+        return None
+
     up = c["close"] > ema200[i] and ema50[i] > ema200[i]
     down = c["close"] < ema200[i] and ema50[i] < ema200[i]
 
     if config["slope_filter"]:
-        # EMA200 needs 200 bars; its value 10 bars earlier may still be None.
-        if i < 10 or ema200[i - 10] is None:
+        if i < 10:
             return None
-        up = up and ema200[i] > ema200[i - 10]
-        down = down and ema200[i] < ema200[i - 10]
+        prior_ema200 = ema200[i - 10]
+        if not isinstance(prior_ema200, (int, float)):
+            return None
+        up = up and ema200[i] > prior_ema200
+        down = down and ema200[i] < prior_ema200
 
     body = abs(c["close"] - c["open"])
     body_ok = body >= config["body_atr"] * atr[i]
