@@ -121,6 +121,25 @@ def init_db():
         conn.commit()
 
 
+def active_trades_report():
+    with closing(_db()) as conn:
+        rows = conn.execute("""
+            SELECT id, side, entry, stop_loss, take_profit_1, take_profit, status, tp1_hit
+            FROM signals WHERE status IN ('OPEN','TP1_HIT')
+            ORDER BY id DESC LIMIT 20
+        """).fetchall()
+    if not rows:
+        return "لا توجد صفقات مفتوحة حالياً."
+    lines = ["📋 متابعة الصفقات النشطة — XAU/USD"]
+    for signal_id, side, entry, stop, tp1, tp2, status, tp1_hit in rows:
+        phase = "تم تحقيق TP1 والوقف عند الدخول" if tp1_hit else "بانتظار TP1"
+        lines.append(
+            f"#{signal_id} {side} | دخول {entry} | الوقف الأصلي {stop} | "
+            f"TP1 {tp1} | TP2 {tp2} | {phase}"
+        )
+    return "\n".join(lines)
+
+
 def save_telegram_chat(chat_id: str):
     with closing(_db()) as conn:
         conn.execute("""
@@ -136,12 +155,14 @@ def load_history():
     with closing(_db()) as conn:
         rows = conn.execute("""
             SELECT symbol, side, entry, stop_loss, take_profit, take_profit_1,
-                   timeframe, reason, rr, updated, telegram
+                   timeframe, reason, rr, updated, telegram, status, tp1_hit,
+                   exit_price, closed_at
             FROM signals ORDER BY id DESC LIMIT ?
         """, (MAX_HISTORY,)).fetchall()
     HISTORY = [
         dict(zip(("symbol", "side", "entry", "stop_loss", "take_profit", "take_profit_1",
-                  "timeframe", "reason", "rr", "updated", "telegram"), row))
+                  "timeframe", "reason", "rr", "updated", "telegram", "status",
+                  "tp1_hit", "exit_price", "closed_at"), row))
         for row in rows
     ]
     if HISTORY:
@@ -240,14 +261,16 @@ async def telegram_webhook(request: Request):
             reply = (
                 "مرحباً بك في Gold AI Assistant 🟡\n"
                 "تم ربط المحادثة بنجاح. ستصلك هنا إشعارات إشارات الذهب عند توفرها.\n"
-                "الأوامر المتاحة: /status و /help"
+                "الأوامر المتاحة: /status و /trades و /backtest و /help"
             )
         elif command == "/help":
-            reply = "هذا البوت يرسل إشعارات تحليل الذهب فقط، ولا ينفذ صفقات. الأوامر: /status للحالة، /backtest للاختبار التاريخي، /testalert لاختبار التنبيه."
+            reply = "هذا البوت يرسل إشعارات تحليل الذهب فقط، ولا ينفذ صفقات. الأوامر: /status للحالة، /trades للصفقات النشطة، /backtest للاختبار التاريخي، /testalert لاختبار التنبيه."
         elif command == "/status":
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
-            reply = f"حالة محرك الذهب: {state}\n{detail}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
+            with closing(_db()) as conn:
+                active_count = conn.execute("SELECT COUNT(*) FROM signals WHERE status IN ('OPEN','TP1_HIT')").fetchone()[0]
+            reply = f"حالة محرك الذهب: {state}\n{detail}\nالصفقات النشطة: {active_count}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
         elif text.lower() == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
         elif command == "/testalert":
@@ -260,6 +283,8 @@ async def telegram_webhook(request: Request):
                 "✅ تم إرسال إشعار الاختبار إلى المحادثات المسجلة."
                 if test_sent else f"❌ تعذر إرسال إشعار الاختبار: {test_note}"
             )
+        elif command == "/trades":
+            reply = active_trades_report()
         elif command == "/backtest":
             try:
                 from app.backtest import run_backtest_report
@@ -331,7 +356,9 @@ def _signal_message(signal: Signal, rr: float, source: str):
         f"وقف الخسارة: {signal.stop_loss}\n"
         f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\n"
         f"TP2: {signal.take_profit}\n"
-        f"العائد/المخاطرة: 1:{rr:.2f}\n"
+        f"العائد/المخاطرة إلى TP2: 1:{rr:.2f}\n"
+        "إدارة الصفقة: إغلاق 50% عند TP1؛ ثم نقل وقف الكمية المتبقية إلى الدخول؛ TP2 للكمية المتبقية.\n"
+        "صلاحية المتابعة: 24 ساعة من إشارة الدخول.\n"
         f"السبب: {signal.reason}\n"
         f"المصدر: {source}\n"
         "تنبيه: الإشارة تحليلية وليست ضماناً للربح؛ تحقق من السعر الحالي والسبريد قبل التنفيذ."
