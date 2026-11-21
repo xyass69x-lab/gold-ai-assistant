@@ -22,7 +22,9 @@ table{width:100%;border-collapse:collapse;margin-top:12px}td,th{text-align:right
 <div class="card"><div class="label">رأس المال المرجعي</div><div class="value">$100</div></div>
 <div class="card"><div class="label">آخر حالة</div><div class="value" id="state">بانتظار البيانات</div></div>
 <div class="card"><div class="label">آخر تحديث</div><div class="value" id="updated" style="font-size:14px">—</div></div>
+<div class="card"><div class="label">محرك التحليل المستقل</div><div class="value" id="engineState" style="font-size:17px">جارٍ التهيئة</div><div class="label" id="enginePrice">السعر: —</div></div>
 </div>
+<section class="card wide note"><b>مصدر البيانات:</b> <span id="engineSource">Yahoo Finance chart (غير رسمي)</span><br><span id="engineDetail">يتم الاتصال بمصدر بيانات الذهب</span><br><span id="engineError"></span></section>
 <section class="card wide"><div class="signal">آخر إشارة</div><div id="latest" class="empty">لم تصل أي إشارة بعد. لا يتم اختلاق أسعار مباشرة.</div></section>
 <section class="card wide"><div class="signal">سجل الإشارات</div><div class="table-wrap"><table><thead><tr><th>النوع</th><th>الدخول</th><th>الوقف</th><th>الهدف</th><th>R:R</th></tr></thead><tbody id="history"><tr><td colspan="5" class="empty">لا توجد بيانات</td></tr></tbody></table></div></section>
 <section class="card wide note">تنبيه: هذه لوحة تستقبل إشارات TradingView وتتحقق من ترتيب الأسعار ونسبة العائد إلى المخاطرة. لا تمثل توصية استثمارية، ولا تتصل بحساب XTB ولا تنفذ صفقات. اختبرها على بيانات تجريبية قبل استخدامها.</section>
@@ -55,6 +57,12 @@ async function refresh() {
     if (!response.ok) throw new Error('status request failed');
     const data = await response.json();
     const signal = data.latest || {};
+    const engine = data.engine || {};
+    byId('engineState').textContent = engine.status === 'online' ? 'متصل' : engine.status === 'error' ? 'تعذر الاتصال' : 'جارٍ التهيئة';
+    byId('enginePrice').textContent = engine.price == null ? 'السعر: —' : 'آخر إغلاق 30 دقيقة: ' + engine.price;
+    byId('engineSource').textContent = engine.source || 'غير محدد';
+    byId('engineDetail').textContent = engine.message || 'بانتظار حالة المحرك';
+    byId('engineError').textContent = engine.last_error ? 'تفاصيل: ' + engine.last_error : '';
     byId('state').textContent = signal.status === 'signal' ? signal.message : 'بانتظار الإشارات';
     byId('updated').textContent = signal.updated ? new Date(signal.updated).toLocaleString('ar') : '—';
     const latest = byId('latest');
