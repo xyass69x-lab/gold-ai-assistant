@@ -113,7 +113,7 @@ load_history()
 ENGINE_STATE = {
     "status": "starting",
     "message": "يتم تهيئة محرك تحليل الذهب",
-    "source": "Yahoo Finance GC=F COMEX gold futures (proxy; not spot XAU/USD)",
+    "source": "Twelve Data XAU/USD spot (Gold Spot / US Dollar)",
     "timeframe": "30m",
     "price": None,
     "last_candle": None,
@@ -203,7 +203,7 @@ async def telegram_webhook(request: Request):
         elif text in ("/status", "/status@GoldAI_Yaser_bot"):
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
-            reply = f"حالة محرك الذهب: {state}\n{detail}\nالمصدر الحالي: GC=F عقود ذهب COMEX الآجلة، وليس السعر الفوري XAU/USD."
+            reply = f"حالة محرك الذهب: {state}\n{detail}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
         elif text == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
         else:
