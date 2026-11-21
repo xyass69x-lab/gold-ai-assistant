@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from app.market_engine import analyze_latest_closed_candle, fetch_candles
+from app.trade_tracker import evaluate_trade_candle
 
 load_dotenv()
 
@@ -23,7 +24,7 @@ APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(APP_DIR.parent / "data" / "signals.db")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Gold AI Assistant", version="0.3.0")
+app = FastAPI(title="Gold AI Assistant", version="0.4.0")
 LATEST = {"status": "waiting", "message": "لا توجد إشارات بعد", "updated": None}
 HISTORY = []
 MAX_HISTORY = 200
@@ -84,8 +85,32 @@ def init_db():
             )
         """)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
-        if "take_profit_1" not in columns:
-            conn.execute("ALTER TABLE signals ADD COLUMN take_profit_1 REAL")
+        migrations = {
+            "take_profit_1": "REAL",
+            "candle_at": "TEXT",
+            "status": "TEXT NOT NULL DEFAULT 'UNTRACKED'",
+            "tp1_hit": "INTEGER NOT NULL DEFAULT 0",
+            "last_checked_candle": "INTEGER",
+            "exit_price": "REAL",
+            "closed_at": "TEXT",
+        }
+        for column, definition in migrations.items():
+            if column not in columns:
+                conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {definition}")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_event_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                event_key TEXT NOT NULL,
+                message TEXT NOT NULL,
+                sent INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                UNIQUE(signal_id, event_key)
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_chats (
                 chat_id TEXT PRIMARY KEY,
@@ -331,12 +356,12 @@ def persist_engine_result(candle_at: str, signal: Optional[Signal], rr: Optional
             cursor = conn.execute("""
                 INSERT INTO signals
                 (symbol, side, entry, stop_loss, take_profit, take_profit_1, timeframe,
-                 reason, rr, updated, telegram)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                 reason, rr, updated, telegram, candle_at, status, tp1_hit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'OPEN', 0)
             """, (
                 "XAUUSD", signal.side.upper(), signal.entry, signal.stop_loss,
                 signal.take_profit, signal.take_profit_1, signal.timeframe,
-                signal.reason, rr, now,
+                signal.reason, rr, now, candle_at,
             ))
             conn.execute("""
                 INSERT OR IGNORE INTO notification_outbox
@@ -345,6 +370,103 @@ def persist_engine_result(candle_at: str, signal: Optional[Signal], rr: Optional
             """, (cursor.lastrowid, "XAUUSD", "30m", candle_at, message, now))
         conn.commit()
         return True
+
+
+def track_open_trades(candles, now=None):
+    """Evaluate only completed candles and queue each trade-state alert once."""
+    now = datetime.now(timezone.utc).timestamp() if now is None else now
+    completed = sorted(
+        [bar for bar in candles if bar["timestamp"] + 30 * 60 <= now],
+        key=lambda bar: bar["timestamp"],
+    )
+    with closing(_db()) as conn:
+        rows = conn.execute("""
+            SELECT id, side, entry, stop_loss, take_profit_1, take_profit,
+                   candle_at, status, tp1_hit, last_checked_candle
+            FROM signals WHERE status IN ('OPEN', 'TP1_HIT') AND candle_at IS NOT NULL
+        """).fetchall()
+
+    for row in rows:
+        signal_id, side, entry, stop, tp1, tp2, candle_at, status, tp1_hit, last_checked = row
+        try:
+            signal_ts = datetime.fromisoformat(candle_at.replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            continue
+        current_status = status
+        current_tp1 = bool(tp1_hit)
+        last_ts = last_checked or int(signal_ts)
+        for bar in completed:
+            ts = bar["timestamp"]
+            if ts <= signal_ts or ts <= last_ts:
+                continue
+            new_status, new_tp1, events, exit_price = evaluate_trade_candle(
+                side, entry, stop, tp1, tp2, current_tp1, bar
+            )
+            with closing(_db()) as conn:
+                conn.execute("""
+                    UPDATE signals SET status=?, tp1_hit=?, last_checked_candle=?,
+                        exit_price=COALESCE(?, exit_price),
+                        closed_at=CASE WHEN ? IN ('TP2_HIT','STOP_LOSS','BREAKEVEN') THEN ? ELSE closed_at END
+                    WHERE id=?
+                """, (
+                    new_status, int(new_tp1), ts, exit_price, new_status,
+                    datetime.now(timezone.utc).isoformat(), signal_id,
+                ))
+                for event in events:
+                    labels = {
+                        "TP1": f"🎯 تحقق الهدف الأول TP1 للصفقة #{signal_id}. تم إغلاق 50% ونقل الوقف إلى نقطة الدخول.",
+                        "TP2": f"🏁 تحقق الهدف الثاني TP2 للصفقة #{signal_id}. اكتملت الصفقة.",
+                        "STOP_LOSS": f"🛑 تم ضرب وقف الخسارة للصفقة #{signal_id}. أُغلقت الصفقة.",
+                        "BREAKEVEN": f"↩️ عادت الصفقة #{signal_id} إلى نقطة الدخول بعد TP1. أُغلقت الكمية المتبقية دون ربح/خسارة سعرية.",
+                    }
+                    event_key = f"{event}:{ts}"
+                    conn.execute("""
+                        INSERT OR IGNORE INTO trade_event_outbox
+                        (signal_id, event_key, message, created_at)
+                        VALUES (?, ?, ?, ?)
+                    """, (signal_id, event_key, labels[event], datetime.now(timezone.utc).isoformat()))
+                conn.commit()
+            current_status, current_tp1, last_ts = new_status, new_tp1, ts
+            if current_status not in ("OPEN", "TP1_HIT"):
+                break
+            if ts - signal_ts >= 48 * 30 * 60:
+                current_status = "EXPIRED"
+                with closing(_db()) as conn:
+                    conn.execute("""
+                        UPDATE signals SET status='EXPIRED', closed_at=?
+                        WHERE id=? AND status IN ('OPEN','TP1_HIT')
+                    """, (datetime.now(timezone.utc).isoformat(), signal_id))
+                    conn.execute("""
+                        INSERT OR IGNORE INTO trade_event_outbox
+                        (signal_id, event_key, message, created_at)
+                        VALUES (?, ?, ?, ?)
+                    """, (
+                        signal_id, f"EXPIRED:{ts}",
+                        f"⌛ انتهت صلاحية الصفقة #{signal_id} بعد 24 ساعة دون وصولها إلى الوقف أو الأهداف.",
+                        datetime.now(timezone.utc).isoformat(),
+                    ))
+                    conn.commit()
+                break
+
+
+def deliver_pending_trade_events(limit: int = 20):
+    with closing(_db()) as conn:
+        pending = conn.execute("""
+            SELECT id, message FROM trade_event_outbox
+            WHERE sent=0 ORDER BY id LIMIT ?
+        """, (limit,)).fetchall()
+    for event_id, message in pending:
+        sent, note = telegram_send(message)
+        with closing(_db()) as conn:
+            conn.execute("""
+                UPDATE trade_event_outbox SET sent=?, attempts=attempts+1,
+                    last_error=?, sent_at=? WHERE id=? AND sent=0
+            """, (
+                int(sent), None if sent else note,
+                datetime.now(timezone.utc).isoformat() if sent else None,
+                event_id,
+            ))
+            conn.commit()
 
 
 def deliver_pending_notifications(limit: int = 10):
@@ -398,8 +520,10 @@ def run_engine_once():
     signal = Signal(**raw_signal) if raw_signal else None
     rr = validate_signal(signal) if signal else None
     persist_engine_result(snapshot["candle_at"], signal, rr, snapshot["source"])
+    track_open_trades(candles)
     load_history()
     deliver_pending_notifications()
+    deliver_pending_trade_events()
 
 
 async def engine_loop():
@@ -416,6 +540,7 @@ async def engine_loop():
             # Retry the durable notification queue even while market data is unavailable.
             try:
                 await asyncio.to_thread(deliver_pending_notifications)
+                await asyncio.to_thread(deliver_pending_trade_events)
             except Exception:
                 pass
         await asyncio.sleep(ENGINE_POLL_SECONDS)
