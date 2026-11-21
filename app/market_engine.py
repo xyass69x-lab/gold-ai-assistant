@@ -1,96 +1,99 @@
 import math
+import os
 import time
 from datetime import datetime, timezone
-from urllib.parse import quote
 
 import requests
 
-YAHOO_SYMBOL = "GC=F"
-INTERVAL = "30m"
-# Yahoo intraday intervals are generally limited to a rolling 60-day window.
-RANGE = "60d"
+# Twelve Data's XAU/USD instrument is Gold Spot / US Dollar (not COMEX futures).
+API_URL = "https://api.twelvedata.com/time_series"
+SYMBOL = "XAU/USD"
+INTERVAL = "30min"
 TIMEFRAME_SECONDS = 30 * 60
 MIN_CLOSED_CANDLES = 220
-MAX_CANDLE_AGE_SECONDS = 90 * 60  # Reject signals when the latest completed 30m candle is over 90 minutes old
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; GoldAIAssistant/1.0)",
-    "Accept": "application/json",
-}
+MAX_CANDLE_AGE_SECONDS = 90 * 60
+HEADERS = {"User-Agent": "GoldAIAssistant/1.0", "Accept": "application/json"}
 
 
 class MarketDataError(Exception):
     pass
 
 
+def _parse_datetime(value):
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MarketDataError(f"وقت شمعة غير صالح من مزود البيانات: {value}") from exc
+
+
 def fetch_candles():
-    """Fetch COMEX gold futures 30m candles as a clearly-labelled XAU/USD proxy."""
-    symbol = quote(YAHOO_SYMBOL, safe="=")
-    params = {"range": RANGE, "interval": INTERVAL, "events": "history"}
-    last_error = None
+    """Fetch real spot-gold XAU/USD 30-minute OHLC candles from Twelve Data."""
+    api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
+    if not api_key:
+        raise MarketDataError(
+            "مفتاح Twelve Data غير مضبوط. أضف TWELVE_DATA_API_KEY في Render Environment."
+        )
 
-    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
-        url = f"https://{host}/v8/finance/chart/{symbol}"
+    params = {
+        "symbol": SYMBOL,
+        "interval": INTERVAL,
+        "outputsize": 5000,
+        "timezone": "UTC",
+        "apikey": api_key,
+    }
+    try:
+        response = requests.get(API_URL, params=params, headers=HEADERS, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise MarketDataError(f"تعذر الاتصال بمزود بيانات XAU/USD: {str(exc)[:180]}") from exc
+
+    if not isinstance(payload, dict):
+        raise MarketDataError("استجابة مزود البيانات غير صالحة")
+    if payload.get("status") == "error" or payload.get("code"):
+        message = payload.get("message") or payload.get("message_detail") or str(payload)
+        raise MarketDataError(f"Twelve Data: {message[:220]}")
+
+    meta = payload.get("meta") or {}
+    returned_symbol = str(meta.get("symbol") or SYMBOL).upper().replace(" ", "")
+    if returned_symbol not in ("XAU/USD", "XAUUSD"):
+        raise MarketDataError(f"رمز غير متوقع من مزود البيانات: {returned_symbol}")
+
+    values = payload.get("values") or []
+    candles = []
+    for item in values:
         try:
-            response = requests.get(url, params=params, headers=HEADERS, timeout=15)
-            response.raise_for_status()
-            payload = response.json()
-            chart = payload.get("chart") or {}
-            if chart.get("error"):
-                raise MarketDataError(str(chart["error"]))
-            result = (chart.get("result") or [None])[0]
-            if not result:
-                raise MarketDataError("مزود البيانات لم يُرجع شموعاً للذهب")
+            op, hi, lo, cl = [float(item[key]) for key in ("open", "high", "low", "close")]
+            if not all(math.isfinite(v) and v > 0 for v in (op, hi, lo, cl)):
+                continue
+            if hi < max(op, cl, lo) or lo > min(op, cl, hi):
+                continue
+            candles.append({
+                "timestamp": _parse_datetime(item["datetime"]),
+                "open": op,
+                "high": hi,
+                "low": lo,
+                "close": cl,
+                "volume": item.get("volume"),
+            })
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
 
-            timestamps = result.get("timestamp") or []
-            quote_data = (result.get("indicators", {}).get("quote") or [{}])[0]
-            opens = quote_data.get("open") or []
-            highs = quote_data.get("high") or []
-            lows = quote_data.get("low") or []
-            closes = quote_data.get("close") or []
-            volumes = quote_data.get("volume") or []
-            candles = []
-
-            for i, stamp in enumerate(timestamps):
-                try:
-                    values = [opens[i], highs[i], lows[i], closes[i]]
-                    if any(value is None for value in values):
-                        continue
-                    op, hi, lo, cl = [float(value) for value in values]
-                    if not all(math.isfinite(v) and v > 0 for v in (op, hi, lo, cl)):
-                        continue
-                    if hi < max(op, cl, lo) or lo > min(op, cl, hi):
-                        continue
-                    candles.append({
-                        "timestamp": int(stamp),
-                        "open": op,
-                        "high": hi,
-                        "low": lo,
-                        "close": cl,
-                        "volume": volumes[i] if i < len(volumes) else None,
-                    })
-                except (IndexError, TypeError, ValueError, OverflowError):
-                    continue
-
-            candles.sort(key=lambda candle: candle["timestamp"])
-            # Remove duplicate timestamps from provider responses.
-            unique = {}
-            for candle in candles:
-                unique[candle["timestamp"]] = candle
-            candles = list(unique.values())
-
-            if len(candles) < MIN_CLOSED_CANDLES:
-                raise MarketDataError(
-                    f"البيانات غير كافية: وصل {len(candles)} شمعة، نحتاج {MIN_CLOSED_CANDLES} على الأقل"
-                )
-            return candles
-        except (requests.RequestException, ValueError, KeyError, TypeError, MarketDataError) as exc:
-            last_error = exc
-
-    raise MarketDataError(f"تعذر جلب بيانات XAU/USD من Yahoo Finance: {last_error}")
+    candles.sort(key=lambda candle: candle["timestamp"])
+    unique = {candle["timestamp"]: candle for candle in candles}
+    candles = list(unique.values())
+    if len(candles) < MIN_CLOSED_CANDLES:
+        raise MarketDataError(
+            f"بيانات XAU/USD غير كافية: وصل {len(candles)} شمعة، نحتاج {MIN_CLOSED_CANDLES} على الأقل. "
+            "تحقق من صلاحية خطة Twelve Data ورمز XAU/USD."
+        )
+    return candles
 
 
 def _ema(values, period):
-    """EMA seeded with the first period SMA to reduce initialization bias."""
     result = [None] * len(values)
     if len(values) < period:
         return result
@@ -107,7 +110,6 @@ def _rsi(values, period=14):
     result = [None] * len(values)
     if len(values) <= period:
         return result
-
     changes = [values[i] - values[i - 1] for i in range(1, len(values))]
     avg_gain = sum(max(change, 0.0) for change in changes[:period]) / period
     avg_loss = sum(max(-change, 0.0) for change in changes[:period]) / period
@@ -130,7 +132,6 @@ def _atr(candles, period=14):
     result = [None] * len(candles)
     if len(candles) < period:
         return result
-
     true_ranges = []
     for i, candle in enumerate(candles):
         previous_close = candles[i - 1]["close"] if i else candle["close"]
@@ -139,7 +140,6 @@ def _atr(candles, period=14):
             abs(candle["high"] - previous_close),
             abs(candle["low"] - previous_close),
         ))
-
     current = sum(true_ranges[:period]) / period
     result[period - 1] = current
     for i in range(period, len(candles)):
@@ -149,7 +149,7 @@ def _atr(candles, period=14):
 
 
 def analyze_latest_closed_candle(candles, now=None):
-    """Analyze only completed candles; never form a signal from an open candle."""
+    """Analyze only completed spot XAU/USD candles; never use the live candle."""
     now = time.time() if now is None else now
     ordered = sorted(candles, key=lambda candle: candle["timestamp"])
     closed = [
@@ -178,7 +178,7 @@ def analyze_latest_closed_candle(candles, now=None):
 
     snapshot = {
         "symbol": "XAUUSD",
-        "source": "Yahoo Finance GC=F COMEX gold futures (proxy; not spot XAU/USD)",
+        "source": "Twelve Data XAU/USD spot (Gold Spot / US Dollar)",
         "timeframe": "30m",
         "price": candle["close"],
         "candle_at": datetime.fromtimestamp(candle["timestamp"], timezone.utc).isoformat(),
@@ -197,18 +197,12 @@ def analyze_latest_closed_candle(candles, now=None):
     trend_up = candle["close"] > ema200[i] and ema50[i] > ema200[i]
     trend_down = candle["close"] < ema200[i] and ema50[i] < ema200[i]
     buy = (
-        trend_up
-        and candle["low"] <= ema20[i]
-        and candle["close"] > ema20[i]
-        and rsi[i] > 52
-        and candle["close"] > candle["open"]
+        trend_up and candle["low"] <= ema20[i] and candle["close"] > ema20[i]
+        and rsi[i] > 52 and candle["close"] > candle["open"]
     )
     sell = (
-        trend_down
-        and candle["high"] >= ema20[i]
-        and candle["close"] < ema20[i]
-        and rsi[i] < 48
-        and candle["close"] < candle["open"]
+        trend_down and candle["high"] >= ema20[i] and candle["close"] < ema20[i]
+        and rsi[i] < 48 and candle["close"] < candle["open"]
     )
 
     if buy:
