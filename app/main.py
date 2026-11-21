@@ -179,11 +179,10 @@ def configure_telegram_webhook():
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    expected_chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     expected_secret = hashlib.sha256(token.encode()).hexdigest() if token else ""
     supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if not token or not expected_chat or not hmac.compare_digest(supplied_secret, expected_secret):
-        raise HTTPException(503, "Telegram configuration is incomplete")
+    if not token or not hmac.compare_digest(supplied_secret, expected_secret):
+        raise HTTPException(503, "Telegram webhook authentication failed")
     try:
         update = await request.json()
         message = update.get("message") or {}
@@ -382,7 +381,8 @@ async def engine_loop():
 @app.on_event("startup")
 async def start_engine():
     global ENGINE_TASK
-    await asyncio.to_thread(configure_telegram_webhook)
+    webhook_ok, webhook_note = await asyncio.to_thread(configure_telegram_webhook)
+    print(f"Telegram webhook setup: {'ok' if webhook_ok else 'failed'} - {webhook_note}")
     ENGINE_TASK = asyncio.create_task(engine_loop())
 
 
