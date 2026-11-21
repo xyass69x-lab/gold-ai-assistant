@@ -112,7 +112,7 @@ load_history()
 ENGINE_STATE = {
     "status": "starting",
     "message": "يتم تهيئة محرك تحليل الذهب",
-    "source": "Yahoo Finance chart (unofficial)",
+    "source": "Yahoo Finance GC=F COMEX gold futures (proxy; not spot XAU/USD)",
     "timeframe": "30m",
     "price": None,
     "last_candle": None,
