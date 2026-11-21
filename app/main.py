@@ -157,6 +157,81 @@ def validate_signal(s: Signal) -> float:
     return rr
 
 
+def configure_telegram_webhook():
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        return False, "TELEGRAM_BOT_TOKEN is missing"
+    url = os.getenv("TELEGRAM_WEBHOOK_URL", "https://gold-ai-assistant.onrender.com/telegram/webhook").strip()
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json={"url": url, "allowed_updates": ["message"], "drop_pending_updates": False},
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return bool(data.get("ok")), data.get("description", "webhook configured")
+    except (requests.RequestException, ValueError) as exc:
+        return False, str(exc)[:250]
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    expected_chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not expected_chat:
+        raise HTTPException(503, "Telegram configuration is incomplete")
+    try:
+        update = await request.json()
+        message = update.get("message") or {}
+        chat = message.get("chat") or {}
+        chat_id = str(chat.get("id", ""))
+        if not chat_id or chat_id != expected_chat:
+            return {"ok": True, "ignored": True}
+        text = str(message.get("text", "")).strip().lower()
+        if text in ("/start", "/start@GoldAI_Yaser_bot"):
+            reply = (
+                "مرحباً بك في Gold AI Assistant 🟡\\n"
+                "تم ربط المحادثة بنجاح. ستصلك هنا إشعارات إشارات الذهب عند توفرها.\\n"
+                "الأوامر المتاحة: /status و /help"
+            )
+        elif text in ("/help", "/help@GoldAI_Yaser_bot"):
+            reply = "هذا البوت يرسل إشعارات تحليل الذهب فقط، ولا ينفذ صفقات. استخدم /status لفحص حالة المحرك."
+        elif text in ("/status", "/status@GoldAI_Yaser_bot"):
+            state = ENGINE_STATE.get("status", "unknown")
+            detail = ENGINE_STATE.get("message", "")
+            reply = f"حالة محرك الذهب: {state}\\n{detail}\\nالمصدر الحالي: GC=F عقود ذهب COMEX الآجلة، وليس السعر الفوري XAU/USD."
+        elif text == "test":
+            reply = "تم اختبار اتصال Telegram بنجاح ✅"
+        else:
+            return {"ok": True, "ignored": True}
+        sent, note = telegram_send_to_chat(chat_id, reply)
+        if not sent:
+            raise HTTPException(502, f"Telegram send failed: {note}")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(400, "Invalid Telegram update")
+
+
+def telegram_send_to_chat(chat_id: str, message: str):
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        return False, "TELEGRAM_BOT_TOKEN is missing"
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return (True, "sent") if data.get("ok") else (False, "Telegram rejected message")
+    except (requests.RequestException, ValueError) as exc:
+        return False, str(exc)[:250]
+
+
 def telegram_send(message: str):
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -304,6 +379,7 @@ async def engine_loop():
 @app.on_event("startup")
 async def start_engine():
     global ENGINE_TASK
+    await asyncio.to_thread(configure_telegram_webhook)
     ENGINE_TASK = asyncio.create_task(engine_loop())
 
 
