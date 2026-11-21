@@ -26,7 +26,7 @@ table{width:100%;border-collapse:collapse;margin-top:12px}td,th{text-align:right
 </div>
 <section class="card wide note"><b>مصدر البيانات:</b> <span id="engineSource">Yahoo Finance chart (غير رسمي)</span><br><span id="engineDetail">يتم الاتصال بمصدر بيانات الذهب</span><br><span id="engineError"></span></section>
 <section class="card wide"><div class="signal">آخر إشارة</div><div id="latest" class="empty">لم تصل أي إشارة بعد. لا يتم اختلاق أسعار مباشرة.</div></section>
-<section class="card wide"><div class="signal">سجل الإشارات</div><div class="table-wrap"><table><thead><tr><th>النوع</th><th>الدخول</th><th>الوقف</th><th>الهدف</th><th>R:R</th></tr></thead><tbody id="history"><tr><td colspan="5" class="empty">لا توجد بيانات</td></tr></tbody></table></div></section>
+<section class="card wide"><div class="signal">سجل الإشارات</div><div class="table-wrap"><table><thead><tr><th>النوع</th><th>الدخول</th><th>الوقف</th><th>TP1</th><th>TP2</th><th>R:R</th></tr></thead><tbody id="history"><tr><td colspan="5" class="empty">لا توجد بيانات</td></tr></tbody></table></div></section>
 <section class="card wide note">تنبيه: هذه لوحة تستقبل إشارات TradingView وتتحقق من ترتيب الأسعار ونسبة العائد إلى المخاطرة. لا تمثل توصية استثمارية، ولا تتصل بحساب XTB ولا تنفذ صفقات. اختبرها على بيانات تجريبية قبل استخدامها.</section>
 </main>
 <script>
@@ -42,12 +42,12 @@ function renderHistory(items) {
   if (!items || !items.length) {
     const row = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 5; td.className = 'empty'; td.textContent = 'لا توجد بيانات';
+    td.colSpan = 6; td.className = 'empty'; td.textContent = 'لا توجد بيانات';
     row.appendChild(td); body.appendChild(row); return;
   }
   items.forEach(s => {
     const row = document.createElement('tr');
-    [s.side, s.entry, s.stop_loss, s.take_profit, `1:${s.rr}`].forEach(v => cell(row, v));
+    [s.side, s.entry, s.stop_loss, s.take_profit_1, s.take_profit, '1:' + s.rr].forEach(v => cell(row, v));
     body.appendChild(row);
   });
 }
@@ -67,7 +67,7 @@ async function refresh() {
     byId('updated').textContent = signal.updated ? new Date(signal.updated).toLocaleString('ar') : '—';
     const latest = byId('latest');
     latest.textContent = signal.status === 'signal'
-      ? `${signal.message} | دخول ${signal.entry} | وقف ${signal.stop_loss} | هدف ${signal.take_profit} | R:R 1:${signal.rr} | ${signal.reason || ''}`
+      ? `${signal.message} | دخول ${signal.entry} | وقف ${signal.stop_loss} | TP1 ${signal.take_profit_1 ?? '—'} | TP2 ${signal.take_profit} | R:R 1:${signal.rr} | ${signal.reason || ''}`
       : 'لم تصل أي إشارة بعد. لا يتم اختلاق أسعار مباشرة.';
     latest.className = signal.status === 'signal' ? '' : 'empty';
     renderHistory(data.history || []);
