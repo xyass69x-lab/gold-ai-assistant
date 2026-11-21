@@ -86,6 +86,23 @@ def init_db():
         columns = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
         if "take_profit_1" not in columns:
             conn.execute("ALTER TABLE signals ADD COLUMN take_profit_1 REAL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_chats (
+                chat_id TEXT PRIMARY KEY,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+
+def save_telegram_chat(chat_id: str):
+    with closing(_db()) as conn:
+        conn.execute("""
+            INSERT INTO telegram_chats (chat_id, active, created_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET active=1
+        """, (str(chat_id), datetime.now(timezone.utc).isoformat()))
         conn.commit()
 
 
@@ -191,20 +208,22 @@ async def telegram_webhook(request: Request):
         # Telegram chat IDs are learned from incoming updates; do not require a preconfigured chat ID for /start.
         if not chat_id:
             return {"ok": True, "ignored": True}
-        text = str(message.get("text", "")).strip().lower()
-        if text in ("/start", "/start@GoldAI_Yaser_bot"):
+        text = str(message.get("text", "")).strip()
+        command = text.split()[0].split("@")[0].lower() if text else ""
+        if command == "/start":
+            save_telegram_chat(chat_id)
             reply = (
                 "مرحباً بك في Gold AI Assistant 🟡\n"
                 "تم ربط المحادثة بنجاح. ستصلك هنا إشعارات إشارات الذهب عند توفرها.\n"
                 "الأوامر المتاحة: /status و /help"
             )
-        elif text in ("/help", "/help@GoldAI_Yaser_bot"):
+        elif command == "/help":
             reply = "هذا البوت يرسل إشعارات تحليل الذهب فقط، ولا ينفذ صفقات. استخدم /status لفحص حالة المحرك."
-        elif text in ("/status", "/status@GoldAI_Yaser_bot"):
+        elif command == "/status":
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
             reply = f"حالة محرك الذهب: {state}\n{detail}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
-        elif text == "test":
+        elif text.lower() == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
         else:
             return {"ok": True, "ignored": True}
@@ -237,22 +256,29 @@ def telegram_send_to_chat(chat_id: str, message: str):
 
 def telegram_send(message: str):
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat_id:
-        return False, "بيانات تلجرام غير مكتملة"
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message},
-            timeout=10,
-        )
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("ok"):
-            return False, "رفض Telegram الرسالة"
-        return True, "sent"
-    except (requests.RequestException, ValueError) as exc:
-        return False, str(exc)[:250]
+    if not token:
+        return False, "TELEGRAM_BOT_TOKEN is missing"
+
+    with closing(_db()) as conn:
+        rows = conn.execute(
+            "SELECT chat_id FROM telegram_chats WHERE active=1"
+        ).fetchall()
+    chat_ids = [str(row[0]) for row in rows]
+
+    # Optional fallback for an explicitly configured chat ID.
+    if not chat_ids:
+        fallback = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        if fallback:
+            chat_ids = [fallback]
+    if not chat_ids:
+        return False, "No Telegram chats registered; send /start to the bot."
+
+    results = [telegram_send_to_chat(chat_id, message) for chat_id in chat_ids]
+    successful = sum(1 for sent, _ in results if sent)
+    if successful == len(chat_ids):
+        return True, f"sent to {successful} chat(s)"
+    errors = [note for sent, note in results if not sent]
+    return False, "; ".join(errors)[:250]
 
 
 def _signal_message(signal: Signal, rr: float, source: str):
