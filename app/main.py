@@ -112,6 +112,18 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS market_report_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candle_at TEXT NOT NULL UNIQUE,
+                message TEXT NOT NULL,
+                sent INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                sent_at TEXT
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_chats (
                 chat_id TEXT PRIMARY KEY,
                 active INTEGER NOT NULL DEFAULT 1,
@@ -528,6 +540,109 @@ def deliver_pending_notifications(limit: int = 10):
             conn.commit()
 
 
+
+def build_market_report(candles, snapshot):
+    """Build an informational 30-minute XAU/USD market map; never creates a trade signal."""
+    now = datetime.now(timezone.utc)
+    completed = [
+        bar for bar in candles
+        if bar["timestamp"] + 30 * 60 <= now.timestamp()
+    ]
+    recent = completed[-96:]
+    price = float(snapshot["price"])
+    atr = float(snapshot["atr14"] or 0)
+    ema20 = float(snapshot["ema20"] or price)
+    ema50 = float(snapshot["ema50"] or price)
+    ema200 = float(snapshot["ema200"] or price)
+
+    highs = []
+    lows = []
+    for i in range(2, len(recent) - 2):
+        window = recent[i - 2:i + 3]
+        if recent[i]["high"] == max(x["high"] for x in window):
+            highs.append(float(recent[i]["high"]))
+        if recent[i]["low"] == min(x["low"] for x in window):
+            lows.append(float(recent[i]["low"]))
+
+    supports = sorted({x for x in lows if x < price}, reverse=True)
+    resistances = sorted({x for x in highs if x > price})
+    if not supports:
+        supports = [min(float(x["low"]) for x in recent)] if recent else []
+    if not resistances:
+        resistances = [max(float(x["high"]) for x in recent)] if recent else []
+
+    support_text = " | ".join(f"{x:.2f}" for x in supports[:3]) or "غير واضحة حالياً"
+    resistance_text = " | ".join(f"{x:.2f}" for x in resistances[:3]) or "غير واضحة حالياً"
+
+    bullish = price > ema200 and ema50 > ema200
+    bearish = price < ema200 and ema50 < ema200
+    if bullish:
+        direction = "صاعد"
+        zone_low, zone_high = sorted((ema20 - 0.25 * atr, ema20 + 0.25 * atr))
+        watch = f"شراء مراقبة قرب {zone_low:.2f} – {zone_high:.2f} بعد ارتداد وتأكيد شمعة مغلقة"
+        condition = "لا يُفعّل الشراء إلا إذا حافظ السعر على الاتجاه الصاعد وظهر تأكيد؛ هذه منطقة مراقبة وليست أمر دخول."
+    elif bearish:
+        direction = "هابط"
+        zone_low, zone_high = sorted((ema20 - 0.25 * atr, ema20 + 0.25 * atr))
+        watch = f"بيع مراقبة قرب {zone_low:.2f} – {zone_high:.2f} بعد رفض سعري وتأكيد شمعة مغلقة"
+        condition = "لا يُفعّل البيع إلا إذا حافظ السعر على الاتجاه الهابط وظهر تأكيد؛ هذه منطقة مراقبة وليست أمر دخول."
+    else:
+        direction = "عرضي / غير محسوم"
+        watch = (
+            f"راقب الدعم {supports[0]:.2f} للبيع/الارتداد والشراء من المقاومة {resistances[0]:.2f}"
+            if supports and resistances else "انتظار وضوح الاتجاه وتكوّن مستويات أقوى"
+        )
+        condition = "لا توجد أفضلية اتجاهية واضحة؛ تجنب الدخول في منتصف النطاق وانتظر تأكيداً."
+
+    rsi = snapshot.get("rsi14")
+    candle_time = snapshot.get("candle_at", "غير متاح")
+    rsi_text = f"{float(rsi):.1f}" if rsi is not None else "غير متاح"
+    return (
+        "📊 تقرير الذهب الدوري — XAU/USD\n"
+        "الإطار: 30 دقيقة | التقرير بعد إغلاق شمعة جديدة\n"
+        f"السعر المرجعي: {price:.2f}\n"
+        f"الاتجاه: {direction}\n"
+        f"الدعم الأقرب: {support_text}\n"
+        f"المقاومة الأقرب: {resistance_text}\n"
+        f"منطقة المراقبة: {watch}\n"
+        f"EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | EMA200: {ema200:.2f} | RSI: {rsi_text}\n"
+        f"ملاحظة: {condition}\n"
+        "لا توجد توصية دخول مؤكدة في هذا التقرير؛ إشارات الاستراتيجية الأصلية تصلك برسالة مستقلة عند تحقق شروطها.\n"
+        f"وقت الشمعة: {candle_time}\n"
+        "تحليل فني احتمالي، وليس ضماناً للربح. تحقق من السعر والسبريد قبل أي قرار."
+    )
+
+
+def queue_market_report(candle_at: str, message: str):
+    with closing(_db()) as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO market_report_outbox
+            (candle_at, message, created_at) VALUES (?, ?, ?)
+        """, (candle_at, message, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+
+
+def deliver_pending_market_reports(limit: int = 5):
+    with closing(_db()) as conn:
+        pending = conn.execute("""
+            SELECT id, message FROM market_report_outbox
+            WHERE sent=0 ORDER BY id LIMIT ?
+        """, (limit,)).fetchall()
+    for report_id, message in pending:
+        sent, note = telegram_send(message)
+        with closing(_db()) as conn:
+            conn.execute("""
+                UPDATE market_report_outbox
+                SET sent=?, attempts=attempts+1, last_error=?, sent_at=?
+                WHERE id=? AND sent=0
+            """, (
+                int(sent), None if sent else note,
+                datetime.now(timezone.utc).isoformat() if sent else None,
+                report_id,
+            ))
+            conn.commit()
+
+
 def run_engine_once():
     global ENGINE_STATE
     candles = fetch_candles()
@@ -544,6 +659,8 @@ def run_engine_once():
         "indicators": {k: snapshot[k] for k in ("ema20", "ema50", "ema200", "rsi14", "atr14")},
     }
 
+    queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
+    deliver_pending_market_reports()
     signal = Signal(**raw_signal) if raw_signal else None
     rr = validate_signal(signal) if signal else None
     persist_engine_result(snapshot["candle_at"], signal, rr, snapshot["source"])
@@ -567,6 +684,7 @@ async def engine_loop():
             # Retry the durable notification queue even while market data is unavailable.
             try:
                 await asyncio.to_thread(deliver_pending_notifications)
+                await asyncio.to_thread(deliver_pending_market_reports)
                 await asyncio.to_thread(deliver_pending_trade_events)
             except Exception:
                 pass
