@@ -550,6 +550,14 @@ def build_market_report(candles, snapshot):
     ]
     recent = completed[-96:]
     price = float(snapshot["price"])
+    candle_open = datetime.fromisoformat(snapshot["candle_at"].replace("Z", "+00:00"))
+    candle_close = candle_open.timestamp() + 30 * 60
+    candle_age_minutes = max(0, int((now.timestamp() - candle_close) / 60))
+    if candle_age_minutes > 35:
+        raise ValueError("بيانات الشمعة قديمة؛ لا يُرسل تقرير بأسعار غير حديثة")
+    oman_close = datetime.fromtimestamp(candle_close, timezone.utc).astimezone(
+        __import__("datetime").timezone(__import__("datetime").timedelta(hours=4))
+    ).strftime("%Y-%m-%d %H:%M")
     atr = float(snapshot["atr14"] or 0)
     ema20 = float(snapshot["ema20"] or price)
     ema50 = float(snapshot["ema50"] or price)
@@ -600,13 +608,16 @@ def build_market_report(candles, snapshot):
     return (
         "📊 تقرير الذهب الدوري — XAU/USD\n"
         "الإطار: 30 دقيقة | التقرير بعد إغلاق شمعة جديدة\n"
-        f"السعر المرجعي: {price:.2f}\n"
+        f"إغلاق آخر شمعة: {price:.2f} دولار (Twelve Data)\n"
+        f"وقت الإغلاق بتوقيت عُمان: {oman_close} | عمر البيانات: {candle_age_minutes} دقيقة\n"
+        "هذا سعر إغلاق شمعة، وليس سعر XTB اللحظي أو سعر تنفيذ.\n"
         f"الاتجاه: {direction}\n"
         f"الدعم الأقرب: {support_text}\n"
         f"المقاومة الأقرب: {resistance_text}\n"
         f"منطقة المراقبة: {watch}\n"
         f"EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | EMA200: {ema200:.2f} | RSI: {rsi_text}\n"
         f"ملاحظة: {condition}\n"
+        "الأسعار والمناطق من Twelve Data وقد تختلف عن XTB؛ تحقق من Bid/Ask على XTB قبل أي تنفيذ.\n"
         "لا توجد توصية دخول مؤكدة في هذا التقرير؛ إشارات الاستراتيجية الأصلية تصلك برسالة مستقلة عند تحقق شروطها.\n"
         f"وقت الشمعة: {candle_time}\n"
         "تحليل فني احتمالي، وليس ضماناً للربح. تحقق من السعر والسبريد قبل أي قرار."
@@ -626,7 +637,8 @@ def deliver_pending_market_reports(limit: int = 5):
     with closing(_db()) as conn:
         pending = conn.execute("""
             SELECT id, message FROM market_report_outbox
-            WHERE sent=0 ORDER BY id LIMIT ?
+            WHERE sent=0 AND datetime(candle_at) >= datetime('now', '-90 minutes')
+            ORDER BY id LIMIT ?
         """, (limit,)).fetchall()
     for report_id, message in pending:
         sent, note = telegram_send(message)
@@ -659,7 +671,8 @@ def run_engine_once():
         "indicators": {k: snapshot[k] for k in ("ema20", "ema50", "ema200", "rsi14", "atr14")},
     }
 
-    queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
+    if snapshot["candle_age_seconds"] <= 35 * 60:
+        queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
     deliver_pending_market_reports()
     signal = Signal(**raw_signal) if raw_signal else None
     rr = validate_signal(signal) if signal else None
