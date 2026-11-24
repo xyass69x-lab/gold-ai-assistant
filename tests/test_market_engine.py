@@ -108,6 +108,30 @@ class MarketEngineTests(unittest.TestCase):
         self.assertIsNotNone(snapshot["rsi14"])
         self.assertIsNotNone(snapshot["atr14"])
 
+    def test_missing_next_candle_keeps_signal_pending_for_retry(self):
+        candles = self.make_candles(220)
+        from app.market_engine import _ema
+        ema20 = _ema([item["close"] for item in candles], 20)[-1]
+        candles[-1]["low"] = ema20 - 0.05
+        now = candles[-1]["timestamp"] + TIMEFRAME_SECONDS + 60
+
+        snapshot, signal = analyze_latest_closed_candle(candles, now=now)
+
+        self.assertIsNone(signal)
+        self.assertTrue(snapshot.get("entry_pending"))
+
+    def test_missing_next_candle_is_not_pending_after_entry_window(self):
+        candles = self.make_candles(220)
+        from app.market_engine import _ema
+        ema20 = _ema([item["close"] for item in candles], 20)[-1]
+        candles[-1]["low"] = ema20 - 0.05
+        now = candles[-1]["timestamp"] + 2 * TIMEFRAME_SECONDS + 60
+
+        snapshot, signal = analyze_latest_closed_candle(candles, now=now)
+
+        self.assertIsNone(signal)
+        self.assertFalse(snapshot.get("entry_pending", False))
+
 
 if __name__ == "__main__":
     unittest.main()
