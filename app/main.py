@@ -312,7 +312,7 @@ async def telegram_webhook(request: Request):
             reply = active_trades_report()
         elif command == "/backtest":
             try:
-                from app.backtest import run_backtest_report
+                from app.backtest_mtf import run_backtest_report
                 reply = await asyncio.to_thread(run_backtest_report)
             except Exception as exc:
                 reply = f"⚠️ تعذر إكمال الاختبار التاريخي: {str(exc)[:250]}"
