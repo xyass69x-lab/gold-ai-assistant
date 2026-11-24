@@ -46,9 +46,9 @@ class HybridStrategyTests(unittest.TestCase):
         bars = self.make_candles(220)
         bars[-2]["close"] = 2021.0
         bars[-1].update({"open": 2021.05, "high": 2022.1, "low": 2020.9, "close": 2022.0})
-        ema20 = [100.0] * 220
-        ema50 = [99.0] * 220
-        ema200 = [98.0 + i * 0.001 for i in range(220)]
+        ema20 = [2021.5] * 220
+        ema50 = [2020.0] * 220
+        ema200 = [2019.0 + i * 0.001 for i in range(220)]
         rsi = [60.0] * 220
         atr = [1.0] * 220
         indicators = (ema20, ema50, ema200, rsi, atr)
@@ -59,6 +59,24 @@ class HybridStrategyTests(unittest.TestCase):
         self.assertEqual(decision["side"], "BUY")
         self.assertEqual(decision["setup"], "PULLBACK")
         self.assertGreaterEqual(decision["quality_score"], 75)
+
+
+    def test_hybrid_breakout_setup_is_detected(self):
+        bars = self.make_candles(220)
+        bars[-1].update({"open": 2021.0, "high": 2023.0, "low": 2020.9, "close": 2022.5})
+        indicators = (
+            [1990.0] * 220,
+            [2010.0] * 220,
+            [2000.0 + i * 0.001 for i in range(220)],
+            [60.0] * 220,
+            [1.0] * 220,
+        )
+
+        decision = evaluate_strategy_signal(bars, 219, indicators, "BULLISH")
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision["side"], "BUY")
+        self.assertEqual(decision["setup"], "BREAKOUT")
 
     def test_opposite_higher_timeframe_bias_blocks_trade(self):
         bars = self.make_candles(220)
