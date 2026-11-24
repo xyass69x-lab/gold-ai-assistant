@@ -758,12 +758,16 @@ async def engine_loop():
         try:
             await asyncio.to_thread(run_engine_once)
         except Exception as exc:
+            safe_error = f"{type(exc).__name__}: {str(exc)}"[:300]
             ENGINE_STATE.update({
                 "status": "error",
                 "message": "تعذر تحديث بيانات الذهب — سيُعاد المحاولة تلقائياً",
-                "last_error": str(exc)[:300],
+                "last_error": safe_error,
                 "last_checked": datetime.now(timezone.utc).isoformat(),
             })
+            # Render application logs are the source of truth for diagnosing provider failures.
+            # Never log request URLs or API credentials.
+            print(f"MARKET_ENGINE_ERROR {safe_error}", flush=True)
             # Retry the durable notification queue even while market data is unavailable.
             try:
                 await asyncio.to_thread(deliver_pending_notifications)
