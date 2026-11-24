@@ -29,6 +29,7 @@ MIN_BASE_CANDLES = 500
 MIN_H4_CANDLES = 60
 _CACHE = {}
 _LAST_REQUEST_AT = 0.0
+_RATE_LIMIT_UNTIL = 0.0
 
 
 class MarketDataError(RuntimeError):
@@ -63,11 +64,15 @@ def _validate_bar(item):
 
 
 def _fetch_interval(interval, outputsize, cache_seconds, force=False):
-    global _LAST_REQUEST_AT
+    global _LAST_REQUEST_AT, _RATE_LIMIT_UNTIL
     now = time.time()
     cached = _CACHE.get(interval)
     if not force and cached and now - cached["fetched_at"] < cache_seconds:
         return list(cached["candles"])
+
+    if now < _RATE_LIMIT_UNTIL:
+        remaining = max(1, int(_RATE_LIMIT_UNTIL - now))
+        raise MarketDataError(f"حصة Twelve Data موقوفة مؤقتاً؛ أعد المحاولة بعد {remaining} ثانية.")
 
     api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
     if not api_key:
@@ -89,9 +94,14 @@ def _fetch_interval(interval, outputsize, cache_seconds, force=False):
         _LAST_REQUEST_AT = time.time()
         if response.status_code == 429:
             retry = response.headers.get("Retry-After", "")
+            try:
+                cooldown = max(60, min(3600, int(retry)))
+            except (TypeError, ValueError):
+                cooldown = 900
+            _RATE_LIMIT_UNTIL = time.time() + cooldown
             raise MarketDataError(
                 "وصلنا حد طلبات Twelve Data المجاني (429). "
-                f"Retry-After={retry or 'غير محدد'}؛ أوقفنا الإشارات حتى تتجدد الحصة."
+                f"تم إيقاف إعادة المحاولة لمدة {cooldown // 60} دقيقة لحماية الحصة."
             )
         response.raise_for_status()
         payload = response.json()
