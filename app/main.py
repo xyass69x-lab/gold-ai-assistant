@@ -293,8 +293,8 @@ async def telegram_webhook(request: Request):
             error_detail = error_detail.replace("apikey=", "apikey=[مخفي]&")
             with closing(_db()) as conn:
                 active_count = conn.execute("SELECT COUNT(*) FROM signals WHERE status IN ('OPEN','TP1_HIT')").fetchone()[0]
-            diagnostic = f"\\nتفاصيل الخطأ: {error_detail[:240]}" if state == "error" and error_detail else ""
-            reply = f"حالة محرك الذهب: {state}\\n{detail}{diagnostic}\\nالصفقات النشطة: {active_count}\\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
+            diagnostic = f"\nتفاصيل الخطأ: {error_detail[:240]}" if state == "error" and error_detail else ""
+            reply = f"حالة محرك الذهب: {state}\n{detail}{diagnostic}\nالصفقات النشطة: {active_count}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
         elif text.lower() == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
         elif command == "/testalert":
@@ -333,7 +333,7 @@ def _telegram_message_chunks(message: str, limit: int = 4000):
     remaining = str(message or "")
     chunks = []
     while len(remaining) > limit:
-        split_at = remaining.rfind("\\n", 0, limit + 1)
+        split_at = remaining.rfind("\n", 0, limit + 1)
         if split_at < limit // 2:
             split_at = limit
         chunks.append(remaining[:split_at].strip())
