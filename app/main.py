@@ -428,7 +428,9 @@ def persist_engine_result(
     """Atomically claim a candle; leave pending-entry candles eligible for retry."""
     with closing(_db()) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        if signal is None and retry_pending:
+        # A no-signal evaluation must not consume this candle: provider data
+        # can arrive late, and a valid signal may appear within the entry window.
+        if signal is None or rr is None:
             conn.rollback()
             return False
         claimed = conn.execute(
