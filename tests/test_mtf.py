@@ -6,7 +6,7 @@ from app.strategy_mtf import _bias, analyze_mtf
 
 class MultiTimeframeTests(unittest.TestCase):
     def test_m5_cache_is_shorter_than_entry_confirmation_window(self):
-        self.assertLessEqual(BASE_CACHE_SECONDS, 90)
+        self.assertLessEqual(BASE_CACHE_SECONDS, 60)
         self.assertGreaterEqual(BASE_CACHE_SECONDS, 30)
 
     def test_resample_requires_complete_bucket(self):
