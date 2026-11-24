@@ -1,5 +1,8 @@
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
+
+import app.market_engine as market_engine
 
 from app.market_engine import (
     INTERVAL,
@@ -146,6 +149,58 @@ class MarketEngineTests(unittest.TestCase):
 
         self.assertIsNone(signal)
         self.assertFalse(snapshot.get("entry_pending", False))
+
+
+    def test_fetch_candles_reuses_cache_instead_of_calling_provider(self):
+        market_engine._CANDLE_CACHE.update({"fetched_at": 0.0, "candles": None})
+        market_engine._RATE_LIMIT_UNTIL = 0.0
+        base = datetime(2026, 11, 20, 0, 0, tzinfo=timezone.utc)
+        values = []
+        for index in range(220):
+            stamp = base.timestamp() + index * TIMEFRAME_SECONDS
+            dt = datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            close = 2000.0 + index * 0.1
+            values.append({
+                "datetime": dt, "open": str(close - 0.02),
+                "high": str(close + 0.10), "low": str(close - 0.10),
+                "close": str(close), "volume": "1",
+            })
+
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return {"meta": {"symbol": "XAU/USD"}, "values": values}
+
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test-key"}), \
+             patch("app.market_engine.time.time", return_value=1_800_000_000), \
+             patch("app.market_engine.requests.get", return_value=FakeResponse()) as get:
+            first = market_engine.fetch_candles(force_refresh=True)
+            second = market_engine.fetch_candles()
+        self.assertEqual(len(first), 220)
+        self.assertEqual(second, first)
+        get.assert_called_once()
+
+    def test_rate_limit_sets_cooldown_and_prevents_retry_storm(self):
+        market_engine._CANDLE_CACHE.update({"fetched_at": 0.0, "candles": None})
+        market_engine._RATE_LIMIT_UNTIL = 0.0
+
+        class RateLimitedResponse:
+            status_code = 429
+            headers = {"Retry-After": "120"}
+            def raise_for_status(self):
+                return None
+
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test-key"}), \
+             patch("app.market_engine.time.time", return_value=1_800_000_000), \
+             patch("app.market_engine.requests.get", return_value=RateLimitedResponse()) as get:
+            with self.assertRaisesRegex(MarketDataError, "429"):
+                market_engine.fetch_candles(force_refresh=True)
+            with self.assertRaisesRegex(MarketDataError, "إعادة المحاولة"):
+                market_engine.fetch_candles(force_refresh=True)
+        get.assert_called_once()
 
 
 if __name__ == "__main__":
