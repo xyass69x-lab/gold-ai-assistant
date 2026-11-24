@@ -1,36 +1,70 @@
 //@version=6
-indicator("Gold AI Assistant - Selective Signals", overlay=true)
+indicator("Gold AI Assistant - Hybrid Selective Signals", overlay=true)
 
 isGold = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.upper(syminfo.ticker), "GOLD")
+is30m = timeframe.isminutes and timeframe.multiplier == 30
+
 ema200 = ta.ema(close, 200)
 ema50 = ta.ema(close, 50)
 ema20 = ta.ema(close, 20)
 rsi = ta.rsi(close, 14)
 atr = ta.atr(14)
+body = math.abs(close - open)
 
-trendUp = close > ema200 and ema50 > ema200
-trendDown = close < ema200 and ema50 < ema200
-longConfirm = isGold and trendUp and low <= ema20 and close > ema20 and rsi > 52 and close > open
-shortConfirm = isGold and trendDown and high >= ema20 and close < ema20 and rsi < 48 and close < open
+// Use the prior, fully closed 2h candle to avoid higher-timeframe repainting.
+htfClose = request.security(syminfo.tickerid, "120", close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+htfEma20 = request.security(syminfo.tickerid, "120", ta.ema(close, 20)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+htfEma50 = request.security(syminfo.tickerid, "120", ta.ema(close, 50)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+htfBull = not na(htfClose) and htfClose > htfEma50 and htfEma20 > htfEma50
+htfBear = not na(htfClose) and htfClose < htfEma50 and htfEma20 < htfEma50
 
-// Educational ATR levels only. Backtest and validate contract sizing before live use.
-longEntry = close
-longSL = close - 1.5 * atr
-longTP1 = close + 1.5 * atr
-longTP2 = close + 3.0 * atr
-shortEntry = close
-shortSL = close + 1.5 * atr
-shortTP1 = close - 1.5 * atr
-shortTP2 = close - 3.0 * atr
+trendUp = close > ema200 and ema50 > ema200 and ema200 > ema200[10]
+trendDown = close < ema200 and ema50 < ema200 and ema200 < ema200[10]
+
+pullbackLong = low <= ema20 + 0.15 * atr and close > ema20 and close > open and close > close[1]
+pullbackShort = high >= ema20 - 0.15 * atr and close < ema20 and close < open and close < close[1]
+breakoutLong = close > ta.highest(high[1], 20) and close > open and body >= 0.5 * atr
+breakoutShort = close < ta.lowest(low[1], 20) and close < open and body >= 0.5 * atr
+
+longSetup = pullbackLong or breakoutLong
+shortSetup = pullbackShort or breakoutShort
+longRsiOk = rsi > 52 and rsi < 70
+shortRsiOk = rsi > 30 and rsi < 48
+longRsiStrong = rsi >= 55 and rsi <= 65
+shortRsiStrong = rsi >= 35 and rsi <= 45
+
+longScore = 25 + 15 + (htfBull ? 20 : 5) + (longRsiStrong ? 15 : 10) + (body >= 0.35 * atr ? 10 : 5) + 15
+shortScore = 25 + 15 + (htfBear ? 20 : 5) + (shortRsiStrong ? 15 : 10) + (body >= 0.35 * atr ? 10 : 5) + 15
+
+longConfirm = isGold and is30m and trendUp and not htfBear and longRsiOk and longSetup and body >= 0.25 * atr and longScore >= 75 and barstate.isconfirmed
+shortConfirm = isGold and is30m and trendDown and not htfBull and shortRsiOk and shortSetup and body >= 0.25 * atr and shortScore >= 75 and barstate.isconfirmed
 
 plot(ema200, "EMA 200", color=color.orange, linewidth=2)
 plot(ema50, "EMA 50", color=color.blue)
 plot(ema20, "EMA 20", color=color.aqua)
-plotshape(longConfirm and barstate.isconfirmed, title="BUY", style=shape.labelup, location=location.belowbar, color=color.green, text="BUY", textcolor=color.white)
-plotshape(shortConfirm and barstate.isconfirmed, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white)
+plotshape(longConfirm, title="BUY", style=shape.labelup, location=location.belowbar, color=color.green, text="BUY", textcolor=color.white)
+plotshape(shortConfirm, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white)
 
-if longConfirm and barstate.isconfirmed
-    alert('{"symbol":"XAUUSD","side":"BUY","entry":' + str.tostring(longEntry, format.mintick) + ',"stop_loss":' + str.tostring(longSL, format.mintick) + ',"take_profit_1":' + str.tostring(longTP1, format.mintick) + ',"take_profit":' + str.tostring(longTP2, format.mintick) + ',"timeframe":"' + timeframe.period + '","reason":"اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI"}', alert.freq_once_per_bar_close)
+// Send the alert at the next 30m bar open, matching the Python engine's entry convention.
+nextBarIsContinuous = time == time[1] + 30 * 60 * 1000
+longAlert = longConfirm[1] and barstate.isnew and nextBarIsContinuous
+shortAlert = shortConfirm[1] and barstate.isnew and nextBarIsContinuous
 
-if shortConfirm and barstate.isconfirmed
-    alert('{"symbol":"XAUUSD","side":"SELL","entry":' + str.tostring(shortEntry, format.mintick) + ',"stop_loss":' + str.tostring(shortSL, format.mintick) + ',"take_profit_1":' + str.tostring(shortTP1, format.mintick) + ',"take_profit":' + str.tostring(shortTP2, format.mintick) + ',"timeframe":"' + timeframe.period + '","reason":"اتجاه هابط + إعادة اختبار EMA20 + زخم RSI"}', alert.freq_once_per_bar_close)
+longEntry = open
+longRisk = 1.5 * atr[1]
+longSL = longEntry - longRisk
+longTP1 = longEntry + longRisk
+longTP2 = longEntry + 2.0 * longRisk
+shortEntry = open
+shortRisk = 1.5 * atr[1]
+shortSL = shortEntry + shortRisk
+shortTP1 = shortEntry - shortRisk
+shortTP2 = shortEntry - 2.0 * shortRisk
+
+if longAlert
+    setupName = pullbackLong[1] ? "PULLBACK" : "BREAKOUT"
+    alert('{"symbol":"XAUUSD","side":"BUY","entry":' + str.tostring(longEntry, format.mintick) + ',"stop_loss":' + str.tostring(longSL, format.mintick) + ',"take_profit_1":' + str.tostring(longTP1, format.mintick) + ',"take_profit":' + str.tostring(longTP2, format.mintick) + ',"timeframe":"30m","reason":"' + setupName + ' | score ' + str.tostring(longScore[1]) + '/100 | confirmed 2h trend"}', alert.freq_once_per_bar)
+
+if shortAlert
+    setupName = pullbackShort[1] ? "PULLBACK" : "BREAKOUT"
+    alert('{"symbol":"XAUUSD","side":"SELL","entry":' + str.tostring(shortEntry, format.mintick) + ',"stop_loss":' + str.tostring(shortSL, format.mintick) + ',"take_profit_1":' + str.tostring(shortTP1, format.mintick) + ',"take_profit":' + str.tostring(shortTP2, format.mintick) + ',"timeframe":"30m","reason":"' + setupName + ' | score ' + str.tostring(shortScore[1]) + '/100 | confirmed 2h trend"}', alert.freq_once_per_bar)
