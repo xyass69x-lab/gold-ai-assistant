@@ -42,6 +42,18 @@ class HybridStrategyTests(unittest.TestCase):
         # cannot be used as a completed 2h candle.
         self.assertEqual(biases[216], biases[215])
 
+    def test_hybrid_skips_signal_until_ema200_slope_warmup_is_ready(self):
+        bars = self.make_candles(220)
+        ema20 = [2021.5] * 220
+        ema50 = [2020.0] * 220
+        ema200 = [None] * 199 + [2019.0 + i * 0.001 for i in range(21)]
+        rsi = [60.0] * 220
+        atr = [1.0] * 220
+        indicators = (ema20, ema50, ema200, rsi, atr)
+
+        # At index 200, EMA200[200] exists but EMA200[190] is still None.
+        self.assertIsNone(evaluate_strategy_signal(bars, 200, indicators, "BULLISH"))
+
     def test_hybrid_pullback_returns_quality_score(self):
         bars = self.make_candles(220)
         bars[-2]["close"] = 2021.0
