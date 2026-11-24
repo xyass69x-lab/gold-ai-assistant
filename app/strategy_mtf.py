@@ -133,7 +133,7 @@ def analyze_mtf(data, now):
 
     opposing = "BEARISH" if side == "BUY" else "BULLISH"
     agreeing = "BULLISH" if side == "BUY" else "BEARISH"
-    if h1_bias in (opposing, "UNAVAILABLE") or h4_bias in (opposing, "UNAVAILABLE"):
+    if h1_bias in (opposing, "UNAVAILABLE") or h4_bias in (opposing, "UNAVAILABLE") or agreeing not in (h1_bias, h4_bias):
         snapshot["setup"] = None
         return snapshot, None
 
@@ -148,7 +148,11 @@ def analyze_mtf(data, now):
             and current["close"] > m15_closed[i - 1]["close"]
         )
         breakout = current["close"] > max(x["high"] for x in prior) and body >= 0.5 * m15_atr
-        trigger = last_m5["close"] > last_m5["open"] and last_m5["close"] > previous_m5["high"]
+        trigger = (
+            last_m5["close"] > last_m5["open"]
+            and last_m5["close"] > previous_m5["high"]
+            and abs(last_m5["close"] - last_m5["open"]) >= 0.15 * m5_atr
+        )
         rsi_ok = 52 < rsi_values[i] < 70
         rsi_strong = 55 <= rsi_values[i] <= 65
     else:
@@ -158,7 +162,11 @@ def analyze_mtf(data, now):
             and current["close"] < m15_closed[i - 1]["close"]
         )
         breakout = current["close"] < min(x["low"] for x in prior) and body >= 0.5 * m15_atr
-        trigger = last_m5["close"] < last_m5["open"] and last_m5["close"] < previous_m5["low"]
+        trigger = (
+            last_m5["close"] < last_m5["open"]
+            and last_m5["close"] < previous_m5["low"]
+            and abs(last_m5["close"] - last_m5["open"]) >= 0.15 * m5_atr
+        )
         rsi_ok = 30 < rsi_values[i] < 48
         rsi_strong = 35 <= rsi_values[i] <= 45
 
