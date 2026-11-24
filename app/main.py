@@ -455,7 +455,7 @@ def persist_engine_result(
                 INSERT OR IGNORE INTO notification_outbox
                 (signal_id, symbol, timeframe, candle_at, message, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (cursor.lastrowid, "XAUUSD", "30m", candle_at, message, now))
+            """, (cursor.lastrowid, "XAUUSD", "5m", candle_at, message, now))
         conn.commit()
         return True
 
@@ -721,7 +721,7 @@ def run_engine_once():
         "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup")},
     }
 
-    if snapshot["candle_age_seconds"] <= 15 * 60:
+    if snapshot["candle_age_seconds"] <= 15 * 60 and int(datetime.fromisoformat(snapshot["candle_at"]).timestamp()) % (30 * 60) == 0:
         queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
     deliver_pending_market_reports()
     signal = Signal(**raw_signal) if raw_signal else None
