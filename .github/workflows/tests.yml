@@ -2,7 +2,7 @@ name: Python tests
 
 on:
   push:
-    branches: ["main", "autonomous-gold-engine"]
+    branches: ["main", "autonomous-gold-engine", "feature/multi-timeframe-engine"]
   pull_request:
     branches: ["main"]
 
