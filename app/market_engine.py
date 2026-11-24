@@ -219,6 +219,11 @@ def analyze_latest_closed_candle(candles, now=None):
     if buy:
         entry = _next_candle_open_for_entry(candle, ordered, now)
         if entry is None:
+            next_timestamp = candle["timestamp"] + TIMEFRAME_SECONDS
+            next_candle_present = any(item["timestamp"] == next_timestamp for item in ordered)
+            snapshot["entry_pending"] = (
+                not next_candle_present and now < next_timestamp + TIMEFRAME_SECONDS
+            )
             return snapshot, None
         side = "BUY"
         stop = entry - 1.5 * atr[i]
@@ -228,6 +233,11 @@ def analyze_latest_closed_candle(candles, now=None):
     elif sell:
         entry = _next_candle_open_for_entry(candle, ordered, now)
         if entry is None:
+            next_timestamp = candle["timestamp"] + TIMEFRAME_SECONDS
+            next_candle_present = any(item["timestamp"] == next_timestamp for item in ordered)
+            snapshot["entry_pending"] = (
+                not next_candle_present and now < next_timestamp + TIMEFRAME_SECONDS
+            )
             return snapshot, None
         side = "SELL"
         stop = entry + 1.5 * atr[i]
