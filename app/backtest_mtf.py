@@ -1,0 +1,126 @@
+"""Chronological, no-lookahead backtest for the live M5/M15/H1/H4 strategy."""
+import os
+from datetime import datetime, timezone
+
+from app.market_data import fetch_market_data
+from app.strategy_mtf import analyze_mtf
+
+HORIZON_BARS = 288  # 24 hours on M5
+TRAIN_FRACTION = 0.70
+
+
+def _simulate(candles, entry_index, side, entry, stop, tp1, tp2):
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+    tp1_hit = False
+    end = min(entry_index + HORIZON_BARS, len(candles) - 1)
+    for j in range(entry_index, end + 1):
+        bar = candles[j]
+        if side == "BUY":
+            stopped = bar["low"] <= (entry if tp1_hit else stop)
+            first = bar["high"] >= tp1
+            second = bar["high"] >= tp2
+        else:
+            stopped = bar["high"] >= (entry if tp1_hit else stop)
+            first = bar["low"] <= tp1
+            second = bar["low"] <= tp2
+        if stopped:
+            return {"r": 0.5 if tp1_hit else -1.0, "exit": j, "tp1": tp1_hit, "tp2": False}
+        if second:
+            return {"r": 1.5, "exit": j, "tp1": True, "tp2": True}
+        if first:
+            tp1_hit = True
+    direction = 1.0 if side == "BUY" else -1.0
+    remaining = (candles[end]["close"] - entry) * direction / risk
+    result = 0.5 + 0.5 * remaining if tp1_hit else remaining
+    return {"r": result, "exit": end, "tp1": tp1_hit, "tp2": False}
+
+
+def _metrics(trades, cost_r=0.0):
+    values = [t["r"] - cost_r for t in trades]
+    if not values:
+        return {"count": 0, "wins": 0, "net": 0.0, "avg": 0.0, "pf": None, "dd": 0.0}
+    wins = sum(v > 0 for v in values)
+    gains = sum(v for v in values if v > 0)
+    losses = -sum(v for v in values if v < 0)
+    equity = peak = drawdown = 0.0
+    for value in values:
+        equity += value
+        peak = max(peak, equity)
+        drawdown = max(drawdown, peak - equity)
+    return {
+        "count": len(values), "wins": wins, "net": sum(values),
+        "avg": sum(values) / len(values),
+        "pf": gains / losses if losses else None, "dd": drawdown,
+    }
+
+
+def _fmt(label, trades, cost_r):
+    m = _metrics(trades, cost_r)
+    pf = f"{m['pf']:.2f}" if m["pf"] is not None else "غير محسوب"
+    win_rate = 100.0 * m["wins"] / m["count"] if m["count"] else 0.0
+    return (
+        f"{label}: {m['count']} صفقة | الفوز {win_rate:.1f}% | "
+        f"الصافي {m['net']:+.2f}R | المتوسط {m['avg']:+.3f}R | "
+        f"Profit Factor {pf} | Drawdown {m['dd']:.2f}R"
+    )
+
+
+def run_backtest_report():
+    data = fetch_market_data()
+    candles = data["m5"]
+    if len(candles) < 1200:
+        return f"⚠️ عينة M5 قصيرة ({len(candles)} شمعة). لا يمكن تقييم الاستراتيجية بثقة."
+
+    trades = []
+    i = 700
+    split = int(len(candles) * TRAIN_FRACTION)
+    while i < len(candles) - 1:
+        now = int(candles[i]["timestamp"]) + 300
+        snapshot, signal = analyze_mtf(data, now)
+        if not signal:
+            i += 1
+            continue
+        entry_index = i + 1
+        trade = _simulate(
+            candles, entry_index, signal["side"], signal["entry"],
+            signal["stop_loss"], signal["take_profit_1"], signal["take_profit"],
+        )
+        if trade is None:
+            i += 1
+            continue
+        trade.update({
+            "side": signal["side"], "signal_index": i,
+            "setup": snapshot.get("setup"),
+        })
+        trades.append(trade)
+        i = trade["exit"] + 1
+
+    train = [t for t in trades if t["signal_index"] < split and t["exit"] < split]
+    test = [t for t in trades if t["signal_index"] >= split]
+    raw_cost = os.getenv("BACKTEST_ROUND_TURN_COST_R", "").strip()
+    try:
+        cost_r = max(0.0, float(raw_cost)) if raw_cost else 0.0
+    except ValueError:
+        cost_r = 0.0
+
+    start = datetime.fromtimestamp(candles[0]["timestamp"], timezone.utc).strftime("%Y-%m-%d")
+    end = datetime.fromtimestamp(candles[-1]["timestamp"], timezone.utc).strftime("%Y-%m-%d")
+    split_at = datetime.fromtimestamp(candles[split]["timestamp"], timezone.utc).strftime("%Y-%m-%d")
+    lines = [
+        "🧪 اختبار GOLD AI متعدد الأطر — M5/M15/H1/H4",
+        f"مصدر البيانات: {data['source']} | الفترة المتاحة: {start} إلى {end}",
+        f"الشموع: M5={len(data['m5'])} | M15={len(data['m15'])} | H1={len(data['h1'])} | H4={len(data['h4'])}",
+        f"تقسيم زمني: 70% تطوير حتى {split_at} / 30% اختبار مستقل",
+        f"تكلفة التنفيذ المفترضة: {cost_r:.4f}R لكل صفقة (اضبط BACKTEST_ROUND_TURN_COST_R لمعايرة XTB)",
+        "",
+        _fmt("التطوير", train, cost_r),
+        _fmt("الاختبار المستقل OOS", test, cost_r),
+        _fmt("كل العينة", trades, cost_r),
+        "",
+        "النتائج تاريخية وليست ضماناً للأداء المستقبلي. بيانات المزود قد تختلف عن XTB،",
+        "والاختبار لا يمثل التنفيذ الفعلي أو السبريد والانزلاق بدقة ما لم تُعاير تكلفة R.",
+        "لا تعتمد الاستراتيجية على نتيجة عينة قصيرة؛ راقب عدداً كافياً من الصفقات في الحساب التجريبي.",
+    ]
+    return "\n".join(lines)
