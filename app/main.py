@@ -312,6 +312,7 @@ async def telegram_webhook(request: Request):
             return {"ok": True, "ignored": True}
         sent, note = telegram_send_to_chat(chat_id, reply)
         if not sent:
+            print(f"Telegram command reply failed for {command or 'message'} in chat {chat_id}: {note}")
             raise HTTPException(502, f"Telegram send failed: {note}")
         return {"ok": True}
     except HTTPException:
@@ -320,21 +321,47 @@ async def telegram_webhook(request: Request):
         raise HTTPException(400, "Invalid Telegram update")
 
 
+def _telegram_message_chunks(message: str, limit: int = 4000):
+    """Split long plain-text replies below Telegram's 4096-character limit."""
+    remaining = str(message or "")
+    chunks = []
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\\n", 0, limit + 1)
+        if split_at < limit // 2:
+            split_at = limit
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining or not chunks:
+        chunks.append(remaining)
+    return [chunk for chunk in chunks if chunk]
+
+
 def telegram_send_to_chat(chat_id: str, message: str):
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
     try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message},
-            timeout=10,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return (True, "sent") if data.get("ok") else (False, "Telegram rejected message")
-    except (requests.RequestException, ValueError) as exc:
-        return False, str(exc)[:250]
+        for index, chunk in enumerate(_telegram_message_chunks(message), start=1):
+            response = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": chunk},
+                timeout=10,
+            )
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            if not response.ok or not data.get("ok"):
+                description = str(data.get("description") or response.text or "Unknown Telegram API error")
+                error_code = data.get("error_code", response.status_code)
+                note = f"Telegram API {error_code}: {description}"[:350]
+                print(f"Telegram sendMessage failed for chat {chat_id}, part {index}/{len(_telegram_message_chunks(message))}: {note}")
+                return False, note
+        return True, "sent"
+    except requests.RequestException as exc:
+        note = f"Telegram network error: {exc}"[:350]
+        print(f"Telegram sendMessage request failed for chat {chat_id}: {note}")
+        return False, note
 
 
 def telegram_send(message: str):
