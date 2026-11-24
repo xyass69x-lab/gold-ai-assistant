@@ -48,7 +48,7 @@ class MarketEngineTests(unittest.TestCase):
             })
         from app.market_engine import _ema
         ema20 = _ema([item["close"] for item in candles], 20)[-1]
-        candles[-1]["low"] = min(candles[-1]["low"], ema20 + 0.05)
+        candles[-1]["low"] = min(candles[-1]["low"], ema20 - 0.05)
         return candles
 
     def test_market_source_is_spot_gold(self):
