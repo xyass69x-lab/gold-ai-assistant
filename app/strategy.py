@@ -2,9 +2,21 @@
 
 from bisect import bisect_right
 
-from app.market_engine import TIMEFRAME_SECONDS, _ema
-
+TIMEFRAME_SECONDS = 30 * 60
 HTF_SECONDS = 4 * TIMEFRAME_SECONDS
+
+
+def _ema(values, period):
+    result = [None] * len(values)
+    if len(values) < period:
+        return result
+    alpha = 2.0 / (period + 1.0)
+    current = sum(values[:period]) / period
+    result[period - 1] = current
+    for index in range(period, len(values)):
+        current = alpha * values[index] + (1.0 - alpha) * current
+        result[index] = current
+    return result
 LIVE_CONFIG = {
     "mode": "HYBRID",
     "min_score": 75,
