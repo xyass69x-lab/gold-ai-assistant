@@ -22,6 +22,12 @@ from app.trade_tracker import evaluate_trade_candle
 
 load_dotenv()
 
+
+def safe_test_mode():
+    """True disables all Telegram webhook registration and outbound messages."""
+    return os.getenv("SAFE_TEST_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(APP_DIR.parent / "data" / "signals.db")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -241,6 +247,8 @@ def validate_signal(s: Signal) -> float:
 
 
 def configure_telegram_webhook():
+    if safe_test_mode():
+        return False, "SAFE_TEST_MODE enabled; Telegram webhook registration is disabled"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
@@ -260,6 +268,8 @@ def configure_telegram_webhook():
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
+    if safe_test_mode():
+        raise HTTPException(503, "Telegram is disabled in safe test mode")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     expected_secret = hashlib.sha256(token.encode()).hexdigest() if token else ""
     supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -346,6 +356,8 @@ def _telegram_message_chunks(message: str, limit: int = 4000):
 
 
 def telegram_send_to_chat(chat_id: str, message: str):
+    if safe_test_mode():
+        return False, "Telegram outbound delivery disabled by SAFE_TEST_MODE"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
@@ -374,6 +386,8 @@ def telegram_send_to_chat(chat_id: str, message: str):
 
 
 def telegram_send(message: str):
+    if safe_test_mode():
+        return False, "Telegram outbound delivery disabled by SAFE_TEST_MODE"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
