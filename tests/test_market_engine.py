@@ -30,6 +30,27 @@ class MarketEngineTests(unittest.TestCase):
             })
         return candles
 
+
+    def make_pullback_candles(self):
+        candles = self.make_candles(220)
+        # Keep a rising long-term trend but make the last 14 returns mixed,
+        # so RSI is in the strategy's intended 52-70 momentum band.
+        changes = [0.15, -0.10] * 6 + [-0.10, 0.15]
+        close = candles[205]["close"]
+        for offset, change in enumerate(changes, start=206):
+            previous = close
+            close = previous + change
+            candles[offset].update({
+                "open": previous if change > 0 else close,
+                "high": max(previous, close) + 0.10,
+                "low": min(previous, close) - 0.10,
+                "close": close,
+            })
+        from app.market_engine import _ema
+        ema20 = _ema([item["close"] for item in candles], 20)[-1]
+        candles[-1]["low"] = min(candles[-1]["low"], ema20 + 0.05)
+        return candles
+
     def test_market_source_is_spot_gold(self):
         self.assertEqual(SYMBOL, "XAU/USD")
         self.assertEqual(INTERVAL, "30min")
@@ -109,10 +130,7 @@ class MarketEngineTests(unittest.TestCase):
         self.assertIsNotNone(snapshot["atr14"])
 
     def test_missing_next_candle_keeps_signal_pending_for_retry(self):
-        candles = self.make_candles(220)
-        from app.market_engine import _ema
-        ema20 = _ema([item["close"] for item in candles], 20)[-1]
-        candles[-1]["low"] = ema20 - 0.05
+        candles = self.make_pullback_candles()
         now = candles[-1]["timestamp"] + TIMEFRAME_SECONDS + 60
 
         snapshot, signal = analyze_latest_closed_candle(candles, now=now)
@@ -121,10 +139,7 @@ class MarketEngineTests(unittest.TestCase):
         self.assertTrue(snapshot.get("entry_pending"))
 
     def test_missing_next_candle_is_not_pending_after_entry_window(self):
-        candles = self.make_candles(220)
-        from app.market_engine import _ema
-        ema20 = _ema([item["close"] for item in candles], 20)[-1]
-        candles[-1]["low"] = ema20 - 0.05
+        candles = self.make_pullback_candles()
         now = candles[-1]["timestamp"] + 2 * TIMEFRAME_SECONDS + 60
 
         snapshot, signal = analyze_latest_closed_candle(candles, now=now)
