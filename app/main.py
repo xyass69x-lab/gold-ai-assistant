@@ -24,7 +24,7 @@ APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(APP_DIR.parent / "data" / "signals.db")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Gold AI Assistant", version="0.4.0")
+app = FastAPI(title="Gold AI Assistant", version="0.5.0")
 LATEST = {"status": "waiting", "message": "لا توجد إشارات بعد", "updated": None}
 HISTORY = []
 MAX_HISTORY = 200
@@ -208,7 +208,12 @@ def validate_signal(s: Signal) -> float:
     if side not in ("BUY", "SELL"):
         raise HTTPException(400, "side must be BUY or SELL")
 
-    prices = (s.entry, s.stop_loss, s.take_profit) + ((s.take_profit_1,) if s.take_profit_1 is not None else ())
+    # Legacy TradingView alerts may omit TP1. Derive a consistent partial-exit
+    # level so the trade tracker never compares a price with None.
+    if s.take_profit_1 is None:
+        s.take_profit_1 = round((s.entry + s.take_profit) / 2.0, 6)
+
+    prices = (s.entry, s.stop_loss, s.take_profit, s.take_profit_1)
     if not all(math.isfinite(v) and v > 0 for v in prices):
         raise HTTPException(400, "يجب أن تكون جميع الأسعار أرقاماً موجبة وصالحة")
 
@@ -377,10 +382,19 @@ def _signal_message(signal: Signal, rr: float, source: str):
     )
 
 
-def persist_engine_result(candle_at: str, signal: Optional[Signal], rr: Optional[float], source: str):
-    """Atomically claim a candle and, when applicable, persist its signal and notification."""
+def persist_engine_result(
+    candle_at: str,
+    signal: Optional[Signal],
+    rr: Optional[float],
+    source: str,
+    retry_pending: bool = False,
+):
+    """Atomically claim a candle; leave pending-entry candles eligible for retry."""
     with closing(_db()) as conn:
         conn.execute("BEGIN IMMEDIATE")
+        if signal is None and retry_pending:
+            conn.rollback()
+            return False
         claimed = conn.execute(
             "INSERT OR IGNORE INTO processed_candles(symbol,timeframe,candle_at) VALUES(?,?,?)",
             ("XAUUSD", "30m", candle_at),
@@ -676,7 +690,10 @@ def run_engine_once():
     deliver_pending_market_reports()
     signal = Signal(**raw_signal) if raw_signal else None
     rr = validate_signal(signal) if signal else None
-    persist_engine_result(snapshot["candle_at"], signal, rr, snapshot["source"])
+    persist_engine_result(
+        snapshot["candle_at"], signal, rr, snapshot["source"],
+        retry_pending=bool(snapshot.get("entry_pending", False)),
+    )
     track_open_trades(candles)
     load_history()
     deliver_pending_notifications()
@@ -814,7 +831,7 @@ def health():
     return {
         "ok": True,
         "service": "Gold AI Assistant",
-        "version": "0.3.0",
+        "version": "0.5.0",
         "engine": ENGINE_STATE["status"],
         "notifications_pending": pending_notification_count(),
     }
