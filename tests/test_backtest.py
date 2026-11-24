@@ -1,6 +1,6 @@
 import unittest
 
-from app.backtest import _metrics, _signal_side, _simulate_trade
+from app.backtest import _metrics, _signal_side, _simulate_trade, _with_cost
 
 
 class BacktestSimulationTests(unittest.TestCase):
@@ -40,6 +40,18 @@ class BacktestSimulationTests(unittest.TestCase):
         self.assertEqual(result["losses"], 1)
         self.assertEqual(result["breakeven"], 1)
         self.assertAlmostEqual(result["net_r"], 0.5)
+
+    def test_round_trip_cost_is_deducted_from_each_trade(self):
+        trades = [
+            {"gross_r": 1.5, "side": "BUY"},
+            {"gross_r": -1.0, "side": "SELL"},
+        ]
+        adjusted = _with_cost(trades, 0.1)
+        self.assertAlmostEqual(adjusted[0]["net_r"], 1.4)
+        self.assertAlmostEqual(adjusted[1]["net_r"], -1.1)
+        metrics = _metrics(adjusted, "net_r")
+        self.assertAlmostEqual(metrics["net_r"], 0.3)
+        self.assertAlmostEqual(metrics["avg_r"], 0.15)
 
     def test_strict_rsi_filter_blocks_weak_buy(self):
         candles = [{"open": 99.0, "high": 101.0, "low": 99.5, "close": 100.5}]
