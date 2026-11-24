@@ -26,7 +26,7 @@ APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(APP_DIR.parent / "data" / "signals.db")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Gold AI Assistant", version="0.5.0")
+app = FastAPI(title="Gold AI Assistant", version="0.6.0")
 LATEST = {"status": "waiting", "message": "لا توجد إشارات بعد", "updated": None}
 HISTORY = []
 MAX_HISTORY = 200
@@ -868,7 +868,7 @@ def health():
     return {
         "ok": True,
         "service": "Gold AI Assistant",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "engine": ENGINE_STATE["status"],
         "notifications_pending": pending_notification_count(),
     }
