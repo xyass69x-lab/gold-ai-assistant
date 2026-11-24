@@ -187,7 +187,7 @@ def analyze_mtf(data, now):
     # The next M5 candle must already have opened. Never invent an entry price.
     next_ts = int(last_m5["timestamp"]) + 300
     next_bar = next((bar for bar in m5 if int(bar["timestamp"]) == next_ts), None)
-    if next_bar is None or not (next_ts <= now < next_ts + 300):
+    if next_bar is None or not (next_ts <= now < next_ts + 300) or now - next_ts > 90:
         snapshot["entry_pending"] = next_bar is None and now < next_ts + 300
         return snapshot, None
 
