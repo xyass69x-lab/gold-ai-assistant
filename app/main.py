@@ -199,7 +199,7 @@ ENGINE_STATE = {
     "indicators": {},
 }
 ENGINE_TASK = None
-ENGINE_POLL_SECONDS = max(30, min(60, int(os.getenv("ENGINE_POLL_SECONDS", "60"))))
+ENGINE_POLL_SECONDS = max(30, min(60, int(os.getenv("ENGINE_POLL_SECONDS", "30"))))
 
 
 def validate_signal(s: Signal) -> float:
