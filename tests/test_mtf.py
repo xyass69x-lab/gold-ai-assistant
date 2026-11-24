@@ -1,13 +1,14 @@
 import unittest
 
-from app.market_data import BASE_CACHE_SECONDS, resample_candles
+from app.market_data import BASE_CACHE_SECONDS, _next_cache_expiry, resample_candles
 from app.strategy_mtf import _bias, analyze_mtf
 
 
 class MultiTimeframeTests(unittest.TestCase):
-    def test_m5_cache_is_shorter_than_entry_confirmation_window(self):
-        self.assertLessEqual(BASE_CACHE_SECONDS, 60)
-        self.assertGreaterEqual(BASE_CACHE_SECONDS, 30)
+    def test_m5_cache_refreshes_just_after_utc_candle_boundary(self):
+        self.assertEqual(BASE_CACHE_SECONDS, 300)
+        self.assertEqual(_next_cache_expiry("5min", 600), 905)
+        self.assertEqual(_next_cache_expiry("5min", 905), 1205)
 
     def test_resample_requires_complete_bucket(self):
         bars = [
