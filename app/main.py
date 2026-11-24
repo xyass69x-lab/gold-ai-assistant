@@ -15,7 +15,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from app.market_engine import analyze_latest_closed_candle, fetch_candles
+from app.market_data import fetch_market_data
+from app.strategy_mtf import analyze_mtf
 from app.trade_tracker import evaluate_trade_candle
 
 load_dotenv()
@@ -188,8 +189,8 @@ load_history()
 ENGINE_STATE = {
     "status": "starting",
     "message": "يتم تهيئة محرك تحليل الذهب",
-    "source": "Twelve Data XAU/USD spot (Gold Spot / US Dollar)",
-    "timeframe": "30m",
+    "source": "Twelve Data XAU/USD spot",
+    "timeframe": "M5/M15/H1/H4",
     "price": None,
     "last_candle": None,
     "last_checked": None,
@@ -431,7 +432,7 @@ def persist_engine_result(
             return False
         claimed = conn.execute(
             "INSERT OR IGNORE INTO processed_candles(symbol,timeframe,candle_at) VALUES(?,?,?)",
-            ("XAUUSD", "30m", candle_at),
+            ("XAUUSD", "5m", candle_at),
         )
         if claimed.rowcount == 0:
             conn.commit()
@@ -463,7 +464,7 @@ def track_open_trades(candles, now=None):
     """Evaluate only completed candles and queue each trade-state alert once."""
     now = datetime.now(timezone.utc).timestamp() if now is None else now
     completed = sorted(
-        [bar for bar in candles if bar["timestamp"] + 30 * 60 <= now],
+        [bar for bar in candles if bar["timestamp"] + 5 * 60 <= now],
         key=lambda bar: bar["timestamp"],
     )
     with closing(_db()) as conn:
@@ -516,7 +517,7 @@ def track_open_trades(candles, now=None):
             current_status, current_tp1, last_ts = new_status, new_tp1, ts
             if current_status not in ("OPEN", "TP1_HIT"):
                 break
-            if ts - signal_ts >= 48 * 30 * 60:
+            if ts - signal_ts >= 288 * 5 * 60:
                 current_status = "EXPIRED"
                 with closing(_db()) as conn:
                     conn.execute("""
@@ -594,14 +595,14 @@ def build_market_report(candles, snapshot):
     now = datetime.now(timezone.utc)
     completed = [
         bar for bar in candles
-        if bar["timestamp"] + 30 * 60 <= now.timestamp()
+        if bar["timestamp"] + 5 * 60 <= now.timestamp()
     ]
-    recent = completed[-96:]
+    recent = completed[-288:]
     price = float(snapshot["price"])
     candle_open = datetime.fromisoformat(snapshot["candle_at"].replace("Z", "+00:00"))
-    candle_close = candle_open.timestamp() + 30 * 60
+    candle_close = candle_open.timestamp() + 5 * 60
     candle_age_minutes = max(0, int((now.timestamp() - candle_close) / 60))
-    if candle_age_minutes > 35:
+    if candle_age_minutes > 15:
         raise ValueError("بيانات الشمعة قديمة؛ لا يُرسل تقرير بأسعار غير حديثة")
     oman_close = datetime.fromtimestamp(candle_close, timezone.utc).astimezone(
         __import__("datetime").timezone(__import__("datetime").timedelta(hours=4))
@@ -655,7 +656,7 @@ def build_market_report(candles, snapshot):
     rsi_text = f"{float(rsi):.1f}" if rsi is not None else "غير متاح"
     return (
         "📊 تقرير الذهب الدوري — XAU/USD\n"
-        "الإطار: 30 دقيقة | التقرير بعد إغلاق شمعة جديدة\n"
+        "الإطار: M5 / M15 / H1 / H4 | التقرير بعد إغلاق شمعة جديدة\n"
         f"إغلاق آخر شمعة: {price:.2f} دولار (Twelve Data)\n"
         f"وقت الإغلاق بتوقيت عُمان: {oman_close} | عمر البيانات: {candle_age_minutes} دقيقة\n"
         "هذا سعر إغلاق شمعة، وليس سعر XTB اللحظي أو سعر تنفيذ.\n"
@@ -705,8 +706,9 @@ def deliver_pending_market_reports(limit: int = 5):
 
 def run_engine_once():
     global ENGINE_STATE
-    candles = fetch_candles()
-    snapshot, raw_signal = analyze_latest_closed_candle(candles)
+    market_data = fetch_market_data()
+    candles = market_data["m5"]
+    snapshot, raw_signal = analyze_mtf(market_data, time.time())
     ENGINE_STATE = {
         "status": "online",
         "message": "محرك التحليل يعمل — بانتظار تحقق شروط الإشارة" if not raw_signal else f"تم رصد إشارة {raw_signal['side']}",
@@ -719,7 +721,7 @@ def run_engine_once():
         "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup")},
     }
 
-    if snapshot["candle_age_seconds"] <= 35 * 60:
+    if snapshot["candle_age_seconds"] <= 15 * 60:
         queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
     deliver_pending_market_reports()
     signal = Signal(**raw_signal) if raw_signal else None
