@@ -16,10 +16,12 @@ shortConfirm = isGold and trendDown and high >= ema20 and close < ema20 and rsi 
 // Educational ATR levels only. Backtest and validate contract sizing before live use.
 longEntry = close
 longSL = close - 1.5 * atr
-longTP = close + 3.0 * atr
+longTP1 = close + 1.5 * atr
+longTP2 = close + 3.0 * atr
 shortEntry = close
 shortSL = close + 1.5 * atr
-shortTP = close - 3.0 * atr
+shortTP1 = close - 1.5 * atr
+shortTP2 = close - 3.0 * atr
 
 plot(ema200, "EMA 200", color=color.orange, linewidth=2)
 plot(ema50, "EMA 50", color=color.blue)
@@ -28,7 +30,7 @@ plotshape(longConfirm and barstate.isconfirmed, title="BUY", style=shape.labelup
 plotshape(shortConfirm and barstate.isconfirmed, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white)
 
 if longConfirm and barstate.isconfirmed
-    alert('{"symbol":"XAUUSD","side":"BUY","entry":' + str.tostring(longEntry, format.mintick) + ',"stop_loss":' + str.tostring(longSL, format.mintick) + ',"take_profit":' + str.tostring(longTP, format.mintick) + ',"timeframe":"' + timeframe.period + '","reason":"اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI"}', alert.freq_once_per_bar_close)
+    alert('{"symbol":"XAUUSD","side":"BUY","entry":' + str.tostring(longEntry, format.mintick) + ',"stop_loss":' + str.tostring(longSL, format.mintick) + ',"take_profit_1":' + str.tostring(longTP1, format.mintick) + ',"take_profit":' + str.tostring(longTP2, format.mintick) + ',"timeframe":"' + timeframe.period + '","reason":"اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI"}', alert.freq_once_per_bar_close)
 
 if shortConfirm and barstate.isconfirmed
-    alert('{"symbol":"XAUUSD","side":"SELL","entry":' + str.tostring(shortEntry, format.mintick) + ',"stop_loss":' + str.tostring(shortSL, format.mintick) + ',"take_profit":' + str.tostring(shortTP, format.mintick) + ',"timeframe":"' + timeframe.period + '","reason":"اتجاه هابط + إعادة اختبار EMA20 + زخم RSI"}', alert.freq_once_per_bar_close)
+    alert('{"symbol":"XAUUSD","side":"SELL","entry":' + str.tostring(shortEntry, format.mintick) + ',"stop_loss":' + str.tostring(shortSL, format.mintick) + ',"take_profit_1":' + str.tostring(shortTP1, format.mintick) + ',"take_profit":' + str.tostring(shortTP2, format.mintick) + ',"timeframe":"' + timeframe.period + '","reason":"اتجاه هابط + إعادة اختبار EMA20 + زخم RSI"}', alert.freq_once_per_bar_close)
