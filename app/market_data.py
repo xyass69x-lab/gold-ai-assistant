@@ -16,10 +16,13 @@ SYMBOL = "XAU/USD"
 HEADERS = {"User-Agent": "GoldAIAssistant/2.0", "Accept": "application/json"}
 BASE_INTERVAL = "5min"
 BASE_SECONDS = 300
+SETUP_INTERVAL = "15min"
+SETUP_SECONDS = 15 * 60
 HTF_INTERVAL = "4h"
 HTF_SECONDS = 4 * 60 * 60
 BASE_CACHE_SECONDS = max(300, int(os.getenv("M5_CACHE_SECONDS", "300")))
-HTF_CACHE_SECONDS = max(300, int(os.getenv("H4_CACHE_SECONDS", "300")))
+SETUP_CACHE_SECONDS = max(300, int(os.getenv("M15_CACHE_SECONDS", "300")))
+HTF_CACHE_SECONDS = max(900, int(os.getenv("H4_CACHE_SECONDS", "900")))
 MAX_BASE_AGE_SECONDS = 15 * 60
 MAX_HTF_AGE_SECONDS = 8 * 60 * 60
 MIN_BASE_CANDLES = 500
@@ -158,8 +161,10 @@ def fetch_market_data(force_refresh=False, now=None):
     """Return closed M5/M15/H1/H4 series, validating freshness and coverage."""
     now = time.time() if now is None else float(now)
     m5_raw = _fetch_interval(BASE_INTERVAL, 5000, BASE_CACHE_SECONDS, force_refresh)
+    m15_raw = _fetch_interval(SETUP_INTERVAL, 5000, SETUP_CACHE_SECONDS, force_refresh)
     h4_raw = _fetch_interval(HTF_INTERVAL, 500, HTF_CACHE_SECONDS, force_refresh)
     m5 = _closed_only(m5_raw, BASE_SECONDS, now)
+    m15 = _closed_only(m15_raw, SETUP_SECONDS, now)
     h4 = _closed_only(h4_raw, HTF_SECONDS, now)
 
     if not m5:
@@ -173,6 +178,11 @@ def fetch_market_data(force_refresh=False, now=None):
         raise MarketDataError(
             f"بيانات M5 غير كافية: {len(m5)} شمعة، نحتاج {MIN_BASE_CANDLES}."
         )
+    m15_age = now - (m15[-1]["timestamp"] + SETUP_SECONDS) if m15 else float("inf")
+    if not m15 or m15_age < 0 or m15_age > 30 * 60:
+        raise MarketDataError("بيانات M15 غير متاحة أو قديمة؛ أوقفنا الإشارات.")
+    if len(m15) < 220:
+        raise MarketDataError(f"بيانات M15 غير كافية: {len(m15)} شمعة، نحتاج 220.")
     if not h4:
         raise MarketDataError("لا توجد شموع H4 مغلقة")
     h4_age = now - (h4[-1]["timestamp"] + HTF_SECONDS)
@@ -183,8 +193,7 @@ def fetch_market_data(force_refresh=False, now=None):
             f"بيانات H4 غير كافية: {len(h4)} شمعة، نحتاج {MIN_H4_CANDLES}."
         )
 
-    m15 = resample_candles(m5, BASE_SECONDS, 15 * 60)
-    h1 = resample_candles(m5, BASE_SECONDS, 60 * 60)
+    h1 = resample_candles(m15, SETUP_SECONDS, 60 * 60)
     if len(m15) < 220 or len(h1) < 60:
         raise MarketDataError(
             f"التغطية متعددة الأطر غير كافية (M15={len(m15)}, H1={len(h1)})."
@@ -196,5 +205,6 @@ def fetch_market_data(force_refresh=False, now=None):
         "m5": m5, "m15": m15, "h1": h1, "h4": h4,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "m5_age_seconds": int(max(0, m5_age)),
+        "m15_age_seconds": int(max(0, m15_age)),
         "h4_age_seconds": int(max(0, h4_age)),
     }
