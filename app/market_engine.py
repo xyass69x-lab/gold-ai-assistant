@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from app.strategy import LIVE_CONFIG, evaluate_strategy_signal, higher_timeframe_biases
+
 # Twelve Data's XAU/USD instrument is Gold Spot / US Dollar (not COMEX futures).
 API_URL = "https://api.twelvedata.com/time_series"
 SYMBOL = "XAU/USD"
@@ -205,18 +207,14 @@ def analyze_latest_closed_candle(candles, now=None):
     if any(value is None for value in (ema20[i], ema50[i], ema200[i], rsi[i], atr[i])) or atr[i] <= 0:
         return snapshot, None
 
-    trend_up = candle["close"] > ema200[i] and ema50[i] > ema200[i]
-    trend_down = candle["close"] < ema200[i] and ema50[i] < ema200[i]
-    buy = (
-        trend_up and candle["low"] <= ema20[i] and candle["close"] > ema20[i]
-        and rsi[i] > 52 and candle["close"] > candle["open"]
-    )
-    sell = (
-        trend_down and candle["high"] >= ema20[i] and candle["close"] < ema20[i]
-        and rsi[i] < 48 and candle["close"] < candle["open"]
-    )
+    indicators = (ema20, ema50, ema200, rsi, atr)
+    htf_bias = higher_timeframe_biases(closed)[-1]
+    decision = evaluate_strategy_signal(closed, i, indicators, htf_bias, LIVE_CONFIG)
+    snapshot["higher_timeframe_bias"] = htf_bias or "UNAVAILABLE"
+    snapshot["quality_score"] = decision["quality_score"] if decision else None
+    snapshot["setup"] = decision["setup"] if decision else None
 
-    if buy:
+    if decision and decision["side"] == "BUY":
         entry = _next_candle_open_for_entry(candle, ordered, now)
         if entry is None:
             next_timestamp = candle["timestamp"] + TIMEFRAME_SECONDS
@@ -229,8 +227,8 @@ def analyze_latest_closed_candle(candles, now=None):
         stop = entry - 1.5 * atr[i]
         target_1 = entry + 1.5 * atr[i]
         target_2 = entry + 3.0 * atr[i]
-        reason = "اتجاه صاعد + إعادة اختبار EMA20 + زخم RSI؛ الدخول المرجعي افتتاح الشمعة التالية"
-    elif sell:
+        reason = f"{decision['setup']} + اتجاه 30m وموافقة EMA200 + RSI + تقييم جودة {decision['quality_score']}/100؛ دخول افتتاح الشمعة التالية"
+    elif decision and decision["side"] == "SELL":
         entry = _next_candle_open_for_entry(candle, ordered, now)
         if entry is None:
             next_timestamp = candle["timestamp"] + TIMEFRAME_SECONDS
@@ -243,7 +241,7 @@ def analyze_latest_closed_candle(candles, now=None):
         stop = entry + 1.5 * atr[i]
         target_1 = entry - 1.5 * atr[i]
         target_2 = entry - 3.0 * atr[i]
-        reason = "اتجاه هابط + إعادة اختبار EMA20 + زخم RSI؛ الدخول المرجعي افتتاح الشمعة التالية"
+        reason = f"{decision['setup']} + اتجاه 30m وموافقة EMA200 + RSI + تقييم جودة {decision['quality_score']}/100؛ دخول افتتاح الشمعة التالية"
     else:
         return snapshot, None
 

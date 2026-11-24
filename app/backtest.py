@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timezone
 
 from app.market_engine import TIMEFRAME_SECONDS, _atr, _ema, _rsi, fetch_candles
+from app.strategy import LIVE_CONFIG, evaluate_strategy_signal, higher_timeframe_biases
 
 
 HORIZON = 48
@@ -15,6 +16,7 @@ CANDIDATES = (
     {"name": "EMA200_SLOPE", "slope_filter": True, "rsi_buy": 52, "rsi_sell": 48, "body_atr": 0.0},
     {"name": "SLOPE_RSI_55_45", "slope_filter": True, "rsi_buy": 55, "rsi_sell": 45, "body_atr": 0.0},
     {"name": "SLOPE_RSI_BODY", "slope_filter": True, "rsi_buy": 55, "rsi_sell": 45, "body_atr": 0.15},
+    {**LIVE_CONFIG, "name": "HYBRID_PULLBACK_BREAKOUT"},
 )
 
 
@@ -103,7 +105,10 @@ def _metrics(trades):
     }
 
 
-def _signal_side(candles, i, indicators, config):
+def _signal_side(candles, i, indicators, config, htf_bias=None):
+    if config.get("mode") == "HYBRID":
+        decision = evaluate_strategy_signal(candles, i, indicators, htf_bias, config)
+        return decision["side"] if decision else None
     ema20, ema50, ema200, rsi, atr = indicators
     c = candles[i]
 
@@ -144,13 +149,14 @@ def _signal_side(candles, i, indicators, config):
     return None
 
 
-def _run_segment(candles, indicators, config, start, end):
+def _run_segment(candles, indicators, config, start, end, htf_biases=None):
     """Only include trades whose full 24h outcome fits inside [start, end)."""
     trades = []
     i = max(start, 200)
     last_signal = end - HORIZON - 2
     while i <= last_signal:
-        side = _signal_side(candles, i, indicators, config)
+        htf_bias = htf_biases[i] if htf_biases is not None else None
+        side = _signal_side(candles, i, indicators, config, htf_bias)
         if side is None:
             i += 1
             continue
@@ -197,6 +203,7 @@ def run_backtest_report():
         _ema(closes, 20), _ema(closes, 50), _ema(closes, 200),
         _rsi(closes, 14), _atr(candles, 14),
     )
+    htf_biases = higher_timeframe_biases(candles)
     split = int(len(candles) * TRAIN_FRACTION)
     # Purge one 24h horizon at the split to prevent outcome leakage.
     train_end = split - HORIZON
@@ -207,8 +214,8 @@ def run_backtest_report():
 
     results = []
     for config in CANDIDATES:
-        train = _run_segment(candles, indicators, config, 200, train_end)
-        test = _run_segment(candles, indicators, config, test_start, len(candles))
+        train = _run_segment(candles, indicators, config, 200, train_end, htf_biases)
+        test = _run_segment(candles, indicators, config, test_start, len(candles), htf_biases)
         results.append((config, train, test))
 
     # Select using training data only; require a minimum sample and positive expectancy.
@@ -252,7 +259,9 @@ def run_backtest_report():
 
     lines += [
         "",
-        "قواعد الفلاتر: ميل EMA200 خلال 10 شموع؛ تشديد RSI إلى 55/45؛ قوة جسم الشمعة 0.15 ATR.",
+        "النسخة الهجينة الحية: ارتداد EMA20 أو اختراق أعلى/أدنى 20 شمعة؛ ميل EMA200؛ تأكيد اتجاه 2h عند توفره؛ RSI غير متطرف؛ تقييم جودة لا يقل عن 75/100.",
+        "النسخة الهجينة في الاختبار تستخدم نفس دالة القرار المستخدمة في المحرك الحي؛ لا تُستخدم بيانات شموع مستقبلية لحساب اتجاه 2h.",
+        "الفلاتر المرجعية الأخرى: ميل EMA200 خلال 10 شموع؛ تشديد RSI إلى 55/45؛ قوة جسم الشمعة 0.15 ATR.",
         "الدخول عند افتتاح الشمعة التالية، خروج 50% عند TP1 و50% عند TP2، ووقف أولاً عند غموض ترتيب اللمس داخل الشمعة.",
         "لا تشمل النتائج السبريد أو الانزلاق أو العمولة. العينة قصيرة نسبياً؛ لا تغيّر إعدادات التنبيهات الحية بناءً على هذا التقرير وحده.",
     ]

@@ -682,7 +682,7 @@ def run_engine_once():
         "last_candle": snapshot["candle_at"],
         "last_checked": snapshot["checked_at"],
         "last_error": None,
-        "indicators": {k: snapshot[k] for k in ("ema20", "ema50", "ema200", "rsi14", "atr14")},
+        "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup")},
     }
 
     if snapshot["candle_age_seconds"] <= 35 * 60:
