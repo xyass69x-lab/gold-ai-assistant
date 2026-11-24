@@ -88,7 +88,14 @@ def evaluate_strategy_signal(candles, index, indicators, htf_bias=None, config=N
 
     current = candles[index]
     values = (ema20[index], ema50[index], ema200[index], rsi[index], atr[index])
-    if not all(isinstance(value, (int, float)) for value in values) or atr[index] <= 0:
+    prior_ema200 = ema200[index - 10] if index >= 10 else None
+    if (
+        not all(isinstance(value, (int, float)) for value in values)
+        or not isinstance(prior_ema200, (int, float))
+        or atr[index] <= 0
+    ):
+        # EMA200 needs 200 values to initialize, then another 10 bars are
+        # required before its slope can be compared safely.
         return None
 
     close = current["close"]
@@ -96,8 +103,8 @@ def evaluate_strategy_signal(candles, index, indicators, htf_bias=None, config=N
     volatility = atr[index]
     trend_up = close > ema200[index] and ema50[index] > ema200[index]
     trend_down = close < ema200[index] and ema50[index] < ema200[index]
-    slope_up = ema200[index] > ema200[index - 10]
-    slope_down = ema200[index] < ema200[index - 10]
+    slope_up = ema200[index] > prior_ema200
+    slope_down = ema200[index] < prior_ema200
 
     if trend_up:
         side = "BUY"
