@@ -285,9 +285,16 @@ async def telegram_webhook(request: Request):
         elif command == "/status":
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
+            error_detail = str(ENGINE_STATE.get("last_error") or "").strip()
+            # Never expose provider URLs or API credentials in Telegram diagnostics.
+            api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
+            if api_key:
+                error_detail = error_detail.replace(api_key, "[مخفي]")
+            error_detail = error_detail.replace("apikey=", "apikey=[مخفي]&")
             with closing(_db()) as conn:
                 active_count = conn.execute("SELECT COUNT(*) FROM signals WHERE status IN ('OPEN','TP1_HIT')").fetchone()[0]
-            reply = f"حالة محرك الذهب: {state}\n{detail}\nالصفقات النشطة: {active_count}\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
+            diagnostic = f"\\nتفاصيل الخطأ: {error_detail[:240]}" if state == "error" and error_detail else ""
+            reply = f"حالة محرك الذهب: {state}\\n{detail}{diagnostic}\\nالصفقات النشطة: {active_count}\\nالمصدر: {ENGINE_STATE.get('source', 'غير متاح')}."
         elif text.lower() == "test":
             reply = "تم اختبار اتصال Telegram بنجاح ✅"
         elif command == "/testalert":
