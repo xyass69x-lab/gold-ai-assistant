@@ -16,6 +16,13 @@ MIN_CLOSED_CANDLES = 220
 MAX_CANDLE_AGE_SECONDS = 90 * 60
 HEADERS = {"User-Agent": "GoldAIAssistant/1.0", "Accept": "application/json"}
 
+# The 30m engine loop wakes frequently, but Twelve Data should only be queried
+# once per completed-candle window. The same in-process snapshot is shared by
+# the live engine and /backtest to avoid duplicate API calls.
+MARKET_DATA_CACHE_SECONDS = max(300, int(os.getenv("MARKET_DATA_CACHE_SECONDS", "1800")))
+_CANDLE_CACHE = {"fetched_at": 0.0, "candles": None}
+_RATE_LIMIT_UNTIL = 0.0
+
 
 class MarketDataError(Exception):
     pass
@@ -31,8 +38,24 @@ def _parse_datetime(value):
         raise MarketDataError(f"وقت شمعة غير صالح من مزود البيانات: {value}") from exc
 
 
-def fetch_candles():
-    """Fetch real spot-gold XAU/USD 30-minute OHLC candles from Twelve Data."""
+def fetch_candles(force_refresh=False):
+    """Fetch spot-gold candles with a shared TTL cache and a 429 cooldown.
+
+    The cache is deliberately process-local: it prevents the 60-second engine
+    loop and Telegram /backtest from issuing duplicate provider requests.
+    """
+    global _RATE_LIMIT_UNTIL
+    now = time.time()
+    cached = _CANDLE_CACHE.get("candles")
+    fetched_at = float(_CANDLE_CACHE.get("fetched_at") or 0.0)
+    if not force_refresh and cached and now - fetched_at < MARKET_DATA_CACHE_SECONDS:
+        return list(cached)
+    if now < _RATE_LIMIT_UNTIL:
+        wait_seconds = max(1, int(_RATE_LIMIT_UNTIL - now))
+        raise MarketDataError(
+            f"تم إيقاف طلبات Twelve Data مؤقتاً بعد حد الطلبات (429). "
+            f"أعد المحاولة بعد {wait_seconds} ثانية."
+        )
     api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
     if not api_key:
         raise MarketDataError(
@@ -48,8 +71,21 @@ def fetch_candles():
     }
     try:
         response = requests.get(API_URL, params=params, headers=HEADERS, timeout=20)
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                cooldown = max(60, min(3600, int(retry_after)))
+            except (TypeError, ValueError):
+                cooldown = 900
+            _RATE_LIMIT_UNTIL = time.time() + cooldown
+            raise MarketDataError(
+                f"Twelve Data رفض الطلبات (429 Too Many Requests). "
+                f"تم إيقاف إعادة المحاولة لمدة {cooldown // 60} دقيقة لتجنب استهلاك إضافي."
+            )
         response.raise_for_status()
         payload = response.json()
+    except MarketDataError:
+        raise
     except (requests.RequestException, ValueError) as exc:
         raise MarketDataError(f"تعذر الاتصال بمزود بيانات XAU/USD: {str(exc)[:180]}") from exc
 
@@ -92,6 +128,9 @@ def fetch_candles():
             f"بيانات XAU/USD غير كافية: وصل {len(candles)} شمعة، نحتاج {MIN_CLOSED_CANDLES} على الأقل. "
             "تحقق من صلاحية خطة Twelve Data ورمز XAU/USD."
         )
+    _CANDLE_CACHE["fetched_at"] = time.time()
+    _CANDLE_CACHE["candles"] = list(candles)
+    _RATE_LIMIT_UNTIL = 0.0
     return candles
 
 
