@@ -163,37 +163,37 @@ def fetch_market_data(force_refresh=False, now=None):
     m5_raw = _fetch_interval(BASE_INTERVAL, 5000, BASE_CACHE_SECONDS, force_refresh)
     m15_raw = _fetch_interval(SETUP_INTERVAL, 5000, SETUP_CACHE_SECONDS, force_refresh)
     h4_raw = _fetch_interval(HTF_INTERVAL, 500, HTF_CACHE_SECONDS, force_refresh)
-    m5 = _closed_only(m5_raw, BASE_SECONDS, now)
-    m15 = _closed_only(m15_raw, SETUP_SECONDS, now)
-    h4 = _closed_only(h4_raw, HTF_SECONDS, now)
+    m5_closed = _closed_only(m5_raw, BASE_SECONDS, now)
+    m15_closed = _closed_only(m15_raw, SETUP_SECONDS, now)
+    h4_closed = _closed_only(h4_raw, HTF_SECONDS, now)
 
-    if not m5:
+    if not m5_closed:
         raise MarketDataError("لا توجد شموع M5 مغلقة")
-    m5_age = now - (m5[-1]["timestamp"] + BASE_SECONDS)
+    m5_age = now - (m5_closed[-1]["timestamp"] + BASE_SECONDS)
     if m5_age < 0 or m5_age > MAX_BASE_AGE_SECONDS:
         raise MarketDataError(
             f"شموع M5 قديمة منذ {int(max(0, m5_age) / 60)} دقيقة؛ أوقفنا الإشارات."
         )
-    if len(m5) < MIN_BASE_CANDLES:
+    if len(m5_closed) < MIN_BASE_CANDLES:
         raise MarketDataError(
-            f"بيانات M5 غير كافية: {len(m5)} شمعة، نحتاج {MIN_BASE_CANDLES}."
+            f"بيانات M5 غير كافية: {len(m5_closed)} شمعة، نحتاج {MIN_BASE_CANDLES}."
         )
-    m15_age = now - (m15[-1]["timestamp"] + SETUP_SECONDS) if m15 else float("inf")
+    m15_age = now - (m15_closed[-1]["timestamp"] + SETUP_SECONDS) if m15_closed else float("inf")
     if not m15 or m15_age < 0 or m15_age > 30 * 60:
         raise MarketDataError("بيانات M15 غير متاحة أو قديمة؛ أوقفنا الإشارات.")
-    if len(m15) < 220:
-        raise MarketDataError(f"بيانات M15 غير كافية: {len(m15)} شمعة، نحتاج 220.")
-    if not h4:
+    if len(m15_closed) < 220:
+        raise MarketDataError(f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج 220.")
+    if not h4_closed:
         raise MarketDataError("لا توجد شموع H4 مغلقة")
-    h4_age = now - (h4[-1]["timestamp"] + HTF_SECONDS)
+    h4_age = now - (h4_closed[-1]["timestamp"] + HTF_SECONDS)
     if h4_age < 0 or h4_age > MAX_HTF_AGE_SECONDS:
         raise MarketDataError("آخر شمعة H4 قديمة؛ أوقفنا الإشارات.")
-    if len(h4) < MIN_H4_CANDLES:
+    if len(h4_closed) < MIN_H4_CANDLES:
         raise MarketDataError(
-            f"بيانات H4 غير كافية: {len(h4)} شمعة، نحتاج {MIN_H4_CANDLES}."
+            f"بيانات H4 غير كافية: {len(h4_closed)} شمعة، نحتاج {MIN_H4_CANDLES}."
         )
 
-    h1 = resample_candles(m15, SETUP_SECONDS, 60 * 60)
+    h1 = resample_candles(m15_raw, SETUP_SECONDS, 60 * 60)
     if len(m15) < 220 or len(h1) < 60:
         raise MarketDataError(
             f"التغطية متعددة الأطر غير كافية (M15={len(m15)}, H1={len(h1)})."
@@ -202,7 +202,7 @@ def fetch_market_data(force_refresh=False, now=None):
     return {
         "symbol": "XAUUSD",
         "source": "Twelve Data XAU/USD spot",
-        "m5": m5, "m15": m15, "h1": h1, "h4": h4,
+        "m5": m5_raw, "m15": m15_raw, "h1": h1, "h4": h4_raw,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "m5_age_seconds": int(max(0, m5_age)),
         "m15_age_seconds": int(max(0, m15_age)),
