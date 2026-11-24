@@ -29,10 +29,12 @@ def _with_cost(trades, cost_r):
 # Fixed, small hypothesis set. No parameter is selected using validation results.
 CANDIDATES = (
     {"name": "BASELINE", "slope_filter": False, "rsi_buy": 52, "rsi_sell": 48, "body_atr": 0.0},
+    {"name": "BASELINE_SELL_ONLY", "slope_filter": False, "rsi_buy": 52, "rsi_sell": 48, "body_atr": 0.0, "side_filter": "SELL"},
     {"name": "EMA200_SLOPE", "slope_filter": True, "rsi_buy": 52, "rsi_sell": 48, "body_atr": 0.0},
     {"name": "SLOPE_RSI_55_45", "slope_filter": True, "rsi_buy": 55, "rsi_sell": 45, "body_atr": 0.0},
     {"name": "SLOPE_RSI_BODY", "slope_filter": True, "rsi_buy": 55, "rsi_sell": 45, "body_atr": 0.15},
     {**LIVE_CONFIG, "name": "HYBRID_PULLBACK_BREAKOUT"},
+    {**LIVE_CONFIG, "name": "HYBRID_SELL_ONLY", "side_filter": "SELL"},
 )
 
 
@@ -174,7 +176,7 @@ def _run_segment(candles, indicators, config, start, end, htf_biases=None):
     while i <= last_signal:
         htf_bias = htf_biases[i] if htf_biases is not None else None
         side = _signal_side(candles, i, indicators, config, htf_bias)
-        if side is None:
+        if side is None or (config.get("side_filter") and side != config["side_filter"]):
             i += 1
             continue
         entry_index = i + 1
@@ -276,6 +278,28 @@ def run_backtest_report():
     for config, _, test in results:
         lines.append(_format_metrics(f"{config['name']} OOS (إجمالي)", test))
 
+    # Fixed-rule chronological walk-forward diagnostics. These folds are
+    # never used to tune or select thresholds; each test block follows its
+    # own 24h purge from the preceding history.
+    fold_edges = [int(len(candles) * 0.50), int(len(candles) * 0.65),
+                  int(len(candles) * 0.80), len(candles)]
+    hybrid_config = next(c for c in CANDIDATES if c["name"] == "HYBRID_PULLBACK_BREAKOUT")
+    hybrid_sell_config = next(c for c in CANDIDATES if c["name"] == "HYBRID_SELL_ONLY")
+    lines += ["", "اختبار زمني متتابع Walk-forward — قواعد ثابتة دون ضبط على نتائج الفترات:"]
+    fold_names = ("الفترة 1", "الفترة 2", "الفترة 3")
+    for fold_index, fold_name in enumerate(fold_names):
+        fold_start, fold_end = fold_edges[fold_index], fold_edges[fold_index + 1]
+        # Exclude the first 24h of each test block from any preceding trade
+        # outcome; indicator history remains available as it would live.
+        hybrid_fold = _run_segment(
+            candles, indicators, hybrid_config, fold_start, fold_end, htf_biases
+        )
+        sell_fold = _run_segment(
+            candles, indicators, hybrid_sell_config, fold_start, fold_end, htf_biases
+        )
+        lines.append(_format_metrics(f"{fold_name} HYBRID", hybrid_fold))
+        lines.append(_format_metrics(f"{fold_name} HYBRID SELL ONLY", sell_fold))
+
     configured_cost = _configured_round_trip_cost_r()
     if configured_cost is None:
         lines += [
@@ -298,6 +322,8 @@ def run_backtest_report():
     lines += [
         "",
         "النسخة الهجينة الحية: ارتداد EMA20 أو اختراق أعلى/أدنى 20 شمعة؛ ميل EMA200؛ تأكيد اتجاه 2h عند توفره؛ RSI غير متطرف؛ تقييم جودة لا يقل عن 75/100.",
+        "نسخ SELL ONLY مرشحات بحثية فقط ولا تغيّر إشارات التداول الحية.",
+        "اختبار Walk-forward يعرض ثلاث فترات زمنية متتابعة للقواعد الثابتة، ولا يستخدم نتائجها لاختيار إعدادات؛ قد تكون عينات كل فترة صغيرة.",
         "النسخة الهجينة في الاختبار تستخدم نفس دالة القرار المستخدمة في المحرك الحي؛ لا تُستخدم بيانات شموع مستقبلية لحساب اتجاه 2h.",
         "الفلاتر المرجعية الأخرى: ميل EMA200 خلال 10 شموع؛ تشديد RSI إلى 55/45؛ قوة جسم الشمعة 0.15 ATR.",
         "الدخول عند افتتاح الشمعة التالية، خروج 50% عند TP1 و50% عند TP2، ووقف أولاً عند غموض ترتيب اللمس داخل الشمعة.",
