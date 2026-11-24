@@ -20,9 +20,10 @@ SETUP_INTERVAL = "15min"
 SETUP_SECONDS = 15 * 60
 HTF_INTERVAL = "4h"
 HTF_SECONDS = 4 * 60 * 60
-BASE_CACHE_SECONDS = max(30, min(60, int(os.getenv("M5_CACHE_SECONDS", "30"))))
-SETUP_CACHE_SECONDS = max(300, int(os.getenv("M15_CACHE_SECONDS", "300")))
-HTF_CACHE_SECONDS = max(900, int(os.getenv("H4_CACHE_SECONDS", "900")))
+BASE_CACHE_SECONDS = 5 * 60
+SETUP_CACHE_SECONDS = 15 * 60
+HTF_CACHE_SECONDS = 4 * 60 * 60
+INTERVAL_SECONDS = {BASE_INTERVAL: BASE_SECONDS, SETUP_INTERVAL: SETUP_SECONDS, HTF_INTERVAL: HTF_SECONDS}
 MAX_BASE_AGE_SECONDS = 15 * 60
 MAX_HTF_AGE_SECONDS = 8 * 60 * 60
 MIN_BASE_CANDLES = 500
@@ -34,6 +35,12 @@ _RATE_LIMIT_UNTIL = 0.0
 
 class MarketDataError(RuntimeError):
     pass
+
+
+def _next_cache_expiry(interval, now):
+    """Expire just after the next UTC candle boundary to refresh once per bar."""
+    period = INTERVAL_SECONDS[interval]
+    return (int(now) // period + 1) * period + 5
 
 
 def _parse_time(value):
@@ -67,7 +74,7 @@ def _fetch_interval(interval, outputsize, cache_seconds, force=False):
     global _LAST_REQUEST_AT, _RATE_LIMIT_UNTIL
     now = time.time()
     cached = _CACHE.get(interval)
-    if not force and cached and now - cached["fetched_at"] < cache_seconds:
+    if not force and cached and now < cached.get("expires_at", cached["fetched_at"] + cache_seconds):
         return list(cached["candles"])
 
     if now < _RATE_LIMIT_UNTIL:
@@ -129,7 +136,12 @@ def _fetch_interval(interval, outputsize, cache_seconds, force=False):
     if not bars:
         raise MarketDataError(f"لم تصل شموع صالحة من Twelve Data ({interval})")
 
-    _CACHE[interval] = {"fetched_at": time.time(), "candles": list(bars)}
+    fetched_at = time.time()
+    _CACHE[interval] = {
+        "fetched_at": fetched_at,
+        "expires_at": _next_cache_expiry(interval, fetched_at),
+        "candles": list(bars),
+    }
     return bars
 
 
