@@ -35,7 +35,7 @@ class MarketEngineTests(unittest.TestCase):
         candles = self.make_candles(220)
         # Keep a rising long-term trend but make the last 14 returns mixed,
         # so RSI is in the strategy's intended 52-70 momentum band.
-        changes = [0.15, -0.10] * 6 + [-0.10, 0.15]
+        changes = [0.12, -0.10] * 6 + [-0.10, 0.12]
         close = candles[205]["close"]
         for offset, change in enumerate(changes, start=206):
             previous = close
