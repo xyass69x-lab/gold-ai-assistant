@@ -198,7 +198,7 @@ class MarketEngineTests(unittest.TestCase):
              patch("app.market_engine.requests.get", return_value=RateLimitedResponse()) as get:
             with self.assertRaisesRegex(MarketDataError, "429"):
                 market_engine.fetch_candles(force_refresh=True)
-            with self.assertRaisesRegex(MarketDataError, "إعادة المحاولة"):
+            with self.assertRaisesRegex(MarketDataError, "أعد المحاولة"):
                 market_engine.fetch_candles(force_refresh=True)
         get.assert_called_once()
 
