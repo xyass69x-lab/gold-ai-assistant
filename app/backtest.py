@@ -1,4 +1,5 @@
 """Chronological train/validation research for conservative XAU/USD 30m strategy."""
+import os
 import time
 from datetime import datetime, timezone
 
@@ -9,6 +10,21 @@ from app.strategy import LIVE_CONFIG, evaluate_strategy_signal, higher_timeframe
 HORIZON = 48
 TRAIN_FRACTION = 0.70
 MIN_TRAIN_TRADES_FOR_SELECTION = 8
+
+
+def _configured_round_trip_cost_r():
+    raw = os.getenv("BACKTEST_ROUND_TURN_COST_R", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _with_cost(trades, cost_r):
+    return [{**trade, "net_r": trade["gross_r"] - cost_r} for trade in trades]
 
 # Fixed, small hypothesis set. No parameter is selected using validation results.
 CANDIDATES = (
@@ -76,7 +92,7 @@ def _simulate_trade(candles, entry_index, side, entry, risk, horizon):
     }
 
 
-def _metrics(trades):
+def _metrics(trades, value_key="gross_r"):
     total = len(trades)
     if not total:
         return {
@@ -84,14 +100,15 @@ def _metrics(trades):
             "net_r": 0.0, "avg_r": 0.0, "profit_factor": None,
             "max_dd_r": 0.0, "tp1": 0, "tp2": 0,
         }
-    wins = sum(t["gross_r"] > 0 for t in trades)
-    losses = sum(t["gross_r"] < 0 for t in trades)
-    net_r = sum(t["gross_r"] for t in trades)
-    positive = sum(t["gross_r"] for t in trades if t["gross_r"] > 0)
-    negative = -sum(t["gross_r"] for t in trades if t["gross_r"] < 0)
+    values = [t[value_key] for t in trades]
+    wins = sum(value > 0 for value in values)
+    losses = sum(value < 0 for value in values)
+    net_r = sum(values)
+    positive = sum(value for value in values if value > 0)
+    negative = -sum(value for value in values if value < 0)
     equity = peak = max_dd = 0.0
-    for t in trades:
-        equity += t["gross_r"]
+    for value in values:
+        equity += value
         peak = max(peak, equity)
         max_dd = max(max_dd, peak - equity)
     return {
@@ -100,8 +117,8 @@ def _metrics(trades):
         "net_r": net_r, "avg_r": net_r / total,
         "profit_factor": positive / negative if negative else None,
         "max_dd_r": max_dd,
-        "tp1": sum(t["tp1"] for t in trades),
-        "tp2": sum(t["tp2"] for t in trades),
+        "tp1": sum(bool(t.get("tp1", False)) for t in trades),
+        "tp2": sum(bool(t.get("tp2", False)) for t in trades),
     }
 
 
@@ -173,13 +190,13 @@ def _run_segment(candles, indicators, config, start, end, htf_biases=None):
     return trades
 
 
-def _format_metrics(label, trades):
-    m = _metrics(trades)
+def _format_metrics(label, trades, value_key="gross_r"):
+    m = _metrics(trades, value_key)
     if not m["count"]:
         return f"{label}: لا توجد صفقات كافية"
     pf = f'{m["profit_factor"]:.2f}' if m["profit_factor"] is not None else "∞"
-    buy = _metrics([t for t in trades if t["side"] == "BUY"])
-    sell = _metrics([t for t in trades if t["side"] == "SELL"])
+    buy = _metrics([t for t in trades if t["side"] == "BUY"], value_key)
+    sell = _metrics([t for t in trades if t["side"] == "SELL"], value_key)
     return (
         f"{label}: {m['count']} صفقة | صافي {m['net_r']:+.2f}R | "
         f"متوسط {m['avg_r']:+.3f}R | PF {pf} | DD {m['max_dd_r']:.2f}R\n"
@@ -250,12 +267,33 @@ def run_backtest_report():
     if selected:
         config, train, test = selected
         lines.append(f"الفلتر المختار من بيانات التطوير فقط: {config['name']}")
-        lines.append(_format_metrics("BASELINE OOS", baseline[2]))
-        lines.append(_format_metrics(f"{config['name']} OOS", test))
     else:
         lines.append("لم تحقق أي نسخة شروط الاختيار: 8 صفقات تطوير على الأقل، متوسط موجب، وعامل ربح أكبر من 1.")
-        lines.append(_format_metrics("BASELINE OOS", baseline[2]))
         lines.append("لا يوجد فلتر مطوّر مؤهل للاختبار المستقل.")
+
+    # Always expose every candidate's untouched OOS result, whether or not
+    # it passed the training-only selection gate.
+    for config, _, test in results:
+        lines.append(_format_metrics(f"{config['name']} OOS (إجمالي)", test))
+
+    configured_cost = _configured_round_trip_cost_r()
+    if configured_cost is None:
+        lines += [
+            "",
+            "تكاليف التنفيذ: لم تُحتسب؛ اضبط BACKTEST_ROUND_TURN_COST_R بعد معايرة متوسط السبريد والانزلاق والعمولة لدى XTB بوحدة R لكل صفقة.",
+            "المقارنة أعلاه إجمالية قبل التكاليف. متوسط R لكل صفقة يوضح مقدار التكلفة التقريبية التي يمكن تحملها قبل تحول المتوسط إلى سالب.",
+        ]
+    else:
+        lines += [
+            "",
+            f"نتائج الاختبار المستقل بعد خصم تكلفة تنفيذ مفترضة قدرها {configured_cost:.4f}R لكل صفقة:",
+        ]
+        for config, _, test in results:
+            lines.append(_format_metrics(
+                f"{config['name']} OOS (بعد التكلفة)",
+                _with_cost(test, configured_cost),
+                "net_r",
+            ))
 
     lines += [
         "",
