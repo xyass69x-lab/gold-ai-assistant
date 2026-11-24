@@ -117,8 +117,8 @@ def _metrics(trades, value_key="gross_r"):
         "net_r": net_r, "avg_r": net_r / total,
         "profit_factor": positive / negative if negative else None,
         "max_dd_r": max_dd,
-        "tp1": sum(t["tp1"] for t in trades),
-        "tp2": sum(t["tp2"] for t in trades),
+        "tp1": sum(bool(t.get("tp1", False)) for t in trades),
+        "tp2": sum(bool(t.get("tp2", False)) for t in trades),
     }
 
 
