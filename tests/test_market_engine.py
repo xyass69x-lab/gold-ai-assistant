@@ -41,7 +41,7 @@ class MarketEngineTests(unittest.TestCase):
             previous = close
             close = previous + change
             candles[offset].update({
-                "open": previous if change > 0 else close,
+                "open": previous,
                 "high": max(previous, close) + 0.10,
                 "low": min(previous, close) - 0.10,
                 "close": close,
