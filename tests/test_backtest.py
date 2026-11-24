@@ -1,6 +1,8 @@
 import unittest
 
-from app.backtest import _metrics, _signal_side, _simulate_trade, _with_cost
+from unittest.mock import patch
+
+from app.backtest import _metrics, _run_segment, _signal_side, _simulate_trade, _with_cost
 
 
 class BacktestSimulationTests(unittest.TestCase):
@@ -52,6 +54,29 @@ class BacktestSimulationTests(unittest.TestCase):
         metrics = _metrics(adjusted, "net_r")
         self.assertAlmostEqual(metrics["net_r"], 0.3)
         self.assertAlmostEqual(metrics["avg_r"], 0.15)
+
+    def test_sell_only_candidate_filters_out_buy_signals(self):
+        candles = [{"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0}
+                   for _ in range(300)]
+        indicators = ([100.0] * 300,) * 5
+
+        def fake_signal(_candles, index, _indicators, _config, _htf_bias):
+            return {200: "BUY", 201: "SELL"}.get(index)
+
+        def fake_trade(_candles, entry_index, side, _entry, _risk, _horizon):
+            return {
+                "gross_r": 1.0, "tp1": False, "tp2": False,
+                "exit_index": entry_index, "side": side,
+            }
+
+        config = {"side_filter": "SELL"}
+        with patch("app.backtest._signal_side", side_effect=fake_signal), patch(
+            "app.backtest._simulate_trade", side_effect=fake_trade
+        ):
+            trades = _run_segment(candles, indicators, config, 200, 300)
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["side"], "SELL")
 
     def test_strict_rsi_filter_blocks_weak_buy(self):
         candles = [{"open": 99.0, "high": 101.0, "low": 99.5, "close": 100.5}]
