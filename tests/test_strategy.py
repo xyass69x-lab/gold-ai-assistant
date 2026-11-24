@@ -65,9 +65,9 @@ class HybridStrategyTests(unittest.TestCase):
         bars[-2]["close"] = 2021.0
         bars[-1].update({"open": 2021.05, "high": 2022.1, "low": 2020.9, "close": 2022.0})
         indicators = (
-            [100.0] * 220,
-            [99.0] * 220,
-            [98.0 + i * 0.001 for i in range(220)],
+            [2021.5] * 220,
+            [2020.0] * 220,
+            [2019.0 + i * 0.001 for i in range(220)],
             [60.0] * 220,
             [1.0] * 220,
         )
