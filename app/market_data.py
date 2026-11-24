@@ -158,7 +158,7 @@ def resample_candles(candles, source_seconds, target_seconds):
 
 
 def fetch_market_data(force_refresh=False, now=None):
-    """Return closed M5/M15/H1/H4 series, validating freshness and coverage."""
+    """Return raw M5/M15/H4 bars plus closed-bar validation and derived H1."""
     now = time.time() if now is None else float(now)
     m5_raw = _fetch_interval(BASE_INTERVAL, 5000, BASE_CACHE_SECONDS, force_refresh)
     m15_raw = _fetch_interval(SETUP_INTERVAL, 5000, SETUP_CACHE_SECONDS, force_refresh)
@@ -179,7 +179,7 @@ def fetch_market_data(force_refresh=False, now=None):
             f"بيانات M5 غير كافية: {len(m5_closed)} شمعة، نحتاج {MIN_BASE_CANDLES}."
         )
     m15_age = now - (m15_closed[-1]["timestamp"] + SETUP_SECONDS) if m15_closed else float("inf")
-    if not m15 or m15_age < 0 or m15_age > 30 * 60:
+    if not m15_closed or m15_age < 0 or m15_age > 30 * 60:
         raise MarketDataError("بيانات M15 غير متاحة أو قديمة؛ أوقفنا الإشارات.")
     if len(m15_closed) < 220:
         raise MarketDataError(f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج 220.")
@@ -194,9 +194,9 @@ def fetch_market_data(force_refresh=False, now=None):
         )
 
     h1 = resample_candles(m15_raw, SETUP_SECONDS, 60 * 60)
-    if len(m15) < 220 or len(h1) < 60:
+    if len(m15_closed) < 220 or len(h1) < 60:
         raise MarketDataError(
-            f"التغطية متعددة الأطر غير كافية (M15={len(m15)}, H1={len(h1)})."
+            f"التغطية متعددة الأطر غير كافية (M15={len(m15_closed)}, H1={len(h1)})."
         )
 
     return {
