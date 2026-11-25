@@ -143,7 +143,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
             if period == 50:
                 return [121.0] * len(values)
             return [100.0 + i * 0.01 for i in range(len(values))]
-        with patch("app.strategy_mtf.ema", side_effect=weaker_stack), \\
+        with patch("app.strategy_mtf.ema", side_effect=weaker_stack), \
              patches[1], patches[2], patches[3]:
             weaker, weaker_signal = analyze_mtf(self.data, self.now + 271)
         self.assertIsNotNone(weaker_signal)
