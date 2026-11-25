@@ -1,4 +1,6 @@
 """Short-horizon M5 scalp setups; closed candles only, manual execution only."""
+import math
+
 from app.strategy_mtf import ema, rsi, atr
 
 
@@ -68,16 +70,30 @@ def analyze_scalp(data, now, snapshot=None):
             return None
         entry = float(next_bar["open"])
 
-    risk = 1.2 * float(atr_values[i])
+    # Round protective/target levels outward so precision cannot reduce RR below 1:2.
+    precision = 10_000
+    entry_out = round(float(entry), 3)
+    raw_risk = 1.2 * float(atr_values[i])
     if side == "BUY":
-        stop, tp1, tp2 = entry - risk, entry + risk, entry + 2 * risk
+        stop = math.floor((entry_out - raw_risk) * precision) / precision
+        actual_risk = entry_out - stop
+        tp1 = round(entry_out + actual_risk, 4)
+        tp2 = math.ceil((entry_out + 2.0 * actual_risk) * precision) / precision
+        valid_levels = 0 < stop < entry_out < tp1 < tp2
     else:
-        stop, tp1, tp2 = entry + risk, entry - risk, entry - 2 * risk
+        stop = math.ceil((entry_out + raw_risk) * precision) / precision
+        actual_risk = stop - entry_out
+        tp1 = round(entry_out - actual_risk, 4)
+        tp2 = math.floor((entry_out - 2.0 * actual_risk) * precision) / precision
+        valid_levels = 0 < tp2 < tp1 < entry_out < stop
+
+    if not valid_levels or actual_risk <= 0 or abs(tp2 - entry_out) / actual_risk < 2.0:
+        return None
 
     return {
-        "symbol": "XAUUSD", "side": side, "entry": round(entry, 3),
-        "stop_loss": round(stop, 3), "take_profit_1": round(tp1, 3),
-        "take_profit": round(tp2, 3), "timeframe": "M5 SCALP",
+        "symbol": "XAUUSD", "side": side, "entry": entry_out,
+        "stop_loss": round(stop, 4), "take_profit_1": round(tp1, 4),
+        "take_profit": round(tp2, 4), "timeframe": "M5 SCALP",
         "reason": (
             f"فرصة سكالبينغ M5؛ EMA20/50 مع تأكيد شمعة مغلقة؛ "
             f"RSI={rsi_values[i]:.1f}؛ H1={h1} H4={h4}؛ "
