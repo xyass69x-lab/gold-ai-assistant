@@ -25,7 +25,8 @@ table{width:100%;border-collapse:collapse;margin-top:12px}td,th{text-align:right
 <div class="card"><div class="label">رأس المال المرجعي</div><div class="value">$100</div></div>
 <div class="card"><div class="label">حالة المحرك</div><div class="value" id="engineState" style="font-size:17px">جارٍ التهيئة</div></div>
 <div class="card"><div class="label">آخر تحديث</div><div class="value" id="updated" style="font-size:14px">—</div></div>
-<div class="card"><div class="label">آخر إغلاق M5</div><div class="value" id="enginePrice" style="font-size:19px">—</div></div>
+<div class="card"><div class="label">آخر إغلاق M5 (شموع XAUS)</div><div class="value" id="enginePrice" style="font-size:19px">—</div></div>
+<div class="card"><div class="label">السعر اللحظي (BiQuote MT5)</div><div class="value" id="livePrice" style="font-size:19px">—</div><div class="label" id="livePriceAge">عمر السعر: —</div></div>
 <div class="card"><div class="label">إشعارات تنتظر الإرسال</div><div class="value" id="pending">—</div></div>
 </div>
 <section class="card wide note"><b>مصدر البيانات:</b> <span id="engineSource">XAUS chart OHLC (Yahoo Finance proxy) — الذهب الفوري مقابل الدولار</span><br><span id="engineDetail">يتم الاتصال بمصدر بيانات الذهب</span><br><span id="engineCandle">وقت الشمعة: —</span><br><span id="engineError" class="status-error"></span>
@@ -73,6 +74,8 @@ async function refresh() {
     byId('engineState').textContent = online ? 'متصل' : engine.status === 'error' ? 'تعذر الاتصال' : 'جارٍ التهيئة';
     byId('engineState').className = 'value ' + (online ? 'status-ok' : 'status-error');
     byId('enginePrice').textContent = fmt(engine.price);
+    byId('livePrice').textContent = fmt(engine.live_price);
+    byId('livePriceAge').textContent = 'عمر السعر: ' + (engine.live_price_age_seconds == null ? '—' : engine.live_price_age_seconds + ' ثانية');
     byId('engineSource').textContent = 'الشموع: ' + (engine.source || 'غير محدد') + ' | السعر اللحظي: ' + (engine.live_price_source || 'غير متاح');
     byId('engineDetail').textContent = engine.message || 'بانتظار حالة المحرك';
     byId('engineCandle').textContent = 'وقت آخر شمعة مغلقة: ' + (engine.last_candle || '—');
