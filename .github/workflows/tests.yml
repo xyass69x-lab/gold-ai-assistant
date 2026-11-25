@@ -23,4 +23,5 @@ jobs:
       - name: Run all tests
         env:
           DATABASE_PATH: /tmp/gold-ai-assistant-tests/signals.db
+          PYTHONPATH: .
         run: python -m pytest -q
