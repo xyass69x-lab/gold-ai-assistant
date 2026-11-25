@@ -67,8 +67,11 @@ def _fmt(label, trades, cost_r):
     )
 
 
-def run_backtest_report():
-    data = fetch_market_data()
+def run_backtest_report(data=None):
+    # Optional historical dataset is supplied by the isolated research workflow;
+    # live service calls continue to use the normal market-data adapter.
+    if data is None:
+        data = fetch_market_data()
     candles = data["m5"]
     if len(candles) < 1200:
         return f"⚠️ عينة M5 قصيرة ({len(candles)} شمعة). لا يمكن تقييم الاستراتيجية بثقة."
