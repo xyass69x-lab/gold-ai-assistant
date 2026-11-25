@@ -106,6 +106,7 @@ def analyze_mtf(data, now):
 
     snapshot = {
         "symbol": "XAUUSD", "source": data["source"],
+        "live_price_source": data.get("live_price_source"),
         "timeframe": "M5/M15/H1/H4",
         "price": last_m5["close"],
         "candle_at": __import__("datetime").datetime.fromtimestamp(
