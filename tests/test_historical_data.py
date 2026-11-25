@@ -1,91 +1,84 @@
 import unittest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app import historical_data
+from app.market_data import MarketDataError
 
 
-class AlgoSpecialHistoricalDataTests(unittest.TestCase):
-    def test_parses_broker_server_timestamp_and_ohlc(self):
-        bar = historical_data._parse_bar({
-            "Timestamp": "2026.11.25 14:00:00",
-            "Open": "4000.1", "High": "4002.0",
-            "Low": "3999.5", "Close": "4001.2",
-            "TickVolume": 15,
-        })
-        self.assertIsNotNone(bar)
-        self.assertEqual(bar["open"], 4000.1)
-        self.assertEqual(bar["volume"], 15)
+class HistoricalGoldProxyTests(unittest.TestCase):
+    def test_yahoo_gc_chart_payload_is_normalized_and_resampled(self):
+        start = 1_800_000_000
+        count = 4000
+        timestamps = [start + i * 300 for i in range(count)]
+        opens = [4000.0 + i * 0.01 for i in range(count)]
+        closes = [value + 0.1 for value in opens]
+        payload = {
+            "chart": {
+                "result": [{
+                    "timestamp": timestamps,
+                    "indicators": {"quote": [{
+                        "open": opens,
+                        "high": [value + 0.2 for value in closes],
+                        "low": [value - 0.2 for value in opens],
+                        "close": closes,
+                        "volume": [10] * count,
+                    }]},
+                }],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = payload
+        now = timestamps[-1] + 300 + 30
+        with patch.object(historical_data.requests, "get", return_value=response):
+            data = historical_data._fetch_yahoo_gc_history(now)
 
-    def test_rejects_invalid_ohlc(self):
-        self.assertIsNone(historical_data._parse_bar({
-            "Timestamp": "2026.11.25 14:00:00",
-            "Open": 4000, "High": 3990, "Low": 3980, "Close": 4001,
-        }))
-
-    def test_date_chunks_stay_within_provider_row_cap(self):
-        start = datetime(2026, 10, 26).date()
-        end = start + timedelta(days=30)
-        chunks = list(historical_data._date_chunks(start, end, 6))
-        self.assertEqual(len(chunks), 6)
-        self.assertTrue(all((right - left).days < 6 for left, right in chunks))
-        self.assertEqual(chunks[0][0], start)
-        self.assertEqual(chunks[-1][1], end)
-
-    def test_infers_broker_server_offset_from_latest_closed_m5(self):
-        now = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc).timestamp()
-        # Provider timestamps are UTC+2; last M5 opened at 11:55 UTC.
-        raw_open = int(now - 300 + 7200)
-        offset, age = historical_data._infer_server_utc_offset(
-            [{"timestamp": raw_open}], now
-        )
-        self.assertEqual(offset, 7200)
-        self.assertEqual(age, 0)
-
-    def test_refuses_ambiguous_or_old_server_time(self):
-        now = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc).timestamp()
-        with self.assertRaises(historical_data.MarketDataError):
-            historical_data._infer_server_utc_offset(
-                [{"timestamp": int(now - 4 * 3600)}], now
-            )
-
-    def test_fetches_extended_closed_history_and_never_uses_live_quote(self):
-        now = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc).timestamp()
-        offset = 7200
-
-        def bars(count, seconds):
-            result = []
-            for i in range(count):
-                utc_open = now - (count - i) * seconds
-                raw_open = int(utc_open + offset)
-                op = 4000.0 + i * 0.01
-                result.append({
-                    "timestamp": raw_open,
-                    "open": op, "high": op + 1.0,
-                    "low": op - 1.0, "close": op + 0.5,
-                    "volume": 10,
-                })
-            return result
-
-        m5 = bars(31 * 24 * 12, 300)
-        m15 = bars(31 * 24 * 4, 900)
-        h1 = bars(31 * 24, 3600)
-        h4 = bars(31 * 6, 14400)
-
-        def fake_fetch(tf, start, end, max_days):
-            return {"M5": m5, "M15": m15, "H1": h1, "H4": h4}[tf]
-
-        with patch.object(historical_data, "_fetch_timeframe", side_effect=fake_fetch):
-            data = historical_data.fetch_historical_market_data(now)
-
+        self.assertEqual(data["symbol"], "GC=F")
         self.assertGreaterEqual(len(data["m5"]), 3000)
         self.assertGreaterEqual(len(data["m15"]), 220)
         self.assertGreaterEqual(len(data["h1"]), 60)
         self.assertGreaterEqual(len(data["h4"]), 50)
-        self.assertEqual(data["server_utc_offset_seconds"], offset)
         self.assertIsNone(data["live_quote"])
-        self.assertIn("AlgoSpecial", data["source"])
-        self.assertTrue(all(bar["timestamp"] + 300 <= now for bar in data["m5"]))
+        self.assertIn("not spot", data["source"])
+
+    def test_falls_back_to_real_xaus_spot_sample_if_proxy_unavailable(self):
+        spot_data = {
+            "m5": [{"timestamp": i * 300, "open": 1, "high": 2, "low": 1, "close": 2} for i in range(1072)],
+            "m15": [], "h1": [], "h4": [],
+            "source": "XAUS chart OHLC",
+            "live_quote": None,
+        }
+        with patch.object(
+            historical_data, "_fetch_yahoo_gc_history",
+            side_effect=MarketDataError("Yahoo unavailable"),
+        ), patch.object(historical_data, "fetch_market_data", return_value=spot_data):
+            data = historical_data.fetch_historical_market_data(now=1_800_000_000)
+        self.assertIn("short spot fallback", data["source"])
+        self.assertIn("No out-of-sample claim", data["historical_sample_warning"])
+
+    def test_closed_bar_filter_does_not_include_future_candle(self):
+        start = 1_800_000_000
+        count = 10
+        timestamps = [start + i * 300 for i in range(count)]
+        opens = [4000.0] * count
+        payload = {
+            "chart": {"result": [{
+                "timestamp": timestamps,
+                "indicators": {"quote": [{
+                    "open": opens, "high": [4001.0] * count,
+                    "low": [3999.0] * count, "close": [4000.5] * count,
+                    "volume": [1] * count,
+                }]},
+            }], "error": None},
+        }
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = payload
+        now = timestamps[-1] + 100
+        with patch.object(historical_data.requests, "get", return_value=response):
+            with self.assertRaises(MarketDataError):
+                historical_data._fetch_yahoo_gc_history(now)
 
 
 if __name__ == "__main__":
