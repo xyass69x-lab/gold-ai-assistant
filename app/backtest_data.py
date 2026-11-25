@@ -59,8 +59,18 @@ def fetch_historical_bars(timeframe, start_date, end_date):
 def fetch_backtest_dataset():
     # The public preview is limited; these windows provide >1200 M5 bars
     # and enough H1 history for the strategy's H4 bias calculation.
-    m5 = fetch_historical_bars("M5", "2026-10-23", "2026-10-30")
-    h1 = fetch_historical_bars("H1", "2026-10-15", "2026-10-30")
+    m5_parts = [
+        fetch_historical_bars("M5", start, end)
+        for start, end in (
+            ("2026-10-01", "2026-10-08"),
+            ("2026-10-09", "2026-10-16"),
+            ("2026-10-17", "2026-10-24"),
+            ("2026-10-25", "2026-10-30"),
+        )
+    ]
+    m5_by_time = {bar["timestamp"]: bar for part in m5_parts for bar in part}
+    m5 = [m5_by_time[key] for key in sorted(m5_by_time)]
+    h1 = fetch_historical_bars("H1", "2026-10-01", "2026-10-30")
     m15 = resample_candles(m5, 300, 900)
     h4 = resample_candles(h1, 3600, 14400)
     if len(m5) < 1200:
