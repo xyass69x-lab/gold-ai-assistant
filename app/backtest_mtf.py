@@ -126,6 +126,7 @@ def run_backtest_report(data=None):
         "🧪 اختبار GOLD AI متعدد الأطر — M5/M15/H1/H4",
         f"مصدر البيانات: {data['source']} | الفترة المتاحة: {start} إلى {end}",
         f"التوقيت: {data.get('server_time_note', 'توقيت المزود كما ورد في المصدر')}",
+        *([f"تأخر آخر شمعة تاريخية عن اليوم: {data['history_lag_days']} يوم"] if data.get("history_lag_days", 0) > 2 else []),
         f"الشموع: M5={len(data['m5'])} | M15={len(data['m15'])} | H1={len(data['h1'])} | H4={len(data['h4'])}",
         (f"تقسيم زمني: 70% تطوير حتى {split_at} / 30% اختبار مستقل" if split_at else "⚠️ عينة قصيرة: فحص استكشافي فقط، دون ادعاء اختبار OOS أو صلاحية إحصائية"),
         f"تكلفة التنفيذ المفترضة: {cost_r:.4f}R لكل صفقة (اضبط BACKTEST_ROUND_TURN_COST_R لمعايرة XTB)",
