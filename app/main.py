@@ -746,6 +746,8 @@ def run_engine_once():
         "message": "محرك التحليل يعمل — بانتظار تحقق شروط الإشارة" if not raw_signal else f"تم رصد إشارة {raw_signal['side']}",
         "source": snapshot["source"],
         "live_price_source": snapshot.get("live_price_source"),
+        "live_price": snapshot.get("live_price"),
+        "live_price_age_seconds": snapshot.get("live_price_age_seconds"),
         "timeframe": snapshot["timeframe"],
         "price": snapshot["price"],
         "last_candle": snapshot["candle_at"],
