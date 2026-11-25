@@ -39,13 +39,28 @@ class BacktestTimingTests(unittest.TestCase):
     def test_quality_bands_suppress_win_rate_for_small_samples(self):
         trades = [{"r": 1.0, "quality_score": 90} for _ in range(3)]
         report = backtest_mtf._quality_band_report(trades, cost_r=0.0, minimum_sample=20)
-        self.assertIn("90-94: 3 صفقة | عينة غير كافية", report[3])
-        self.assertNotIn("الفوز", report[3])
+        self.assertIn("90-100: 3 صفقة | عينة غير كافية", report[6])
+        self.assertNotIn("الفوز", report[6])
 
     def test_quality_bands_report_metrics_when_sample_is_large_enough(self):
         trades = [{"r": 1.0, "quality_score": 90} for _ in range(20)]
         report = backtest_mtf._quality_band_report(trades, cost_r=0.0, minimum_sample=20)
-        self.assertIn("90-94: 20 صفقة | الفوز 100.0%", report[3])
+        self.assertIn("90-100: 20 صفقة | الفوز 100.0%", report[6])
+
+
+    def test_spearman_score_outcome_detects_positive_ordering(self):
+        trades = [
+            {"quality_score": 50 + i, "r": float(i)}
+            for i in range(12)
+        ]
+        self.assertAlmostEqual(backtest_mtf._spearman_score_outcome(trades), 1.0)
+
+    def test_spearman_score_outcome_detects_inverse_ordering(self):
+        trades = [
+            {"quality_score": 50 + i, "r": float(-i)}
+            for i in range(12)
+        ]
+        self.assertAlmostEqual(backtest_mtf._spearman_score_outcome(trades), -1.0)
 
     def test_stop_wins_when_stop_and_target_touch_same_candle(self):
         candles = [{
