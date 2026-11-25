@@ -73,5 +73,4 @@ def analyze_scalp(data, now, snapshot=None):
             f"جودة فنية {min(100, quality)}/100"
         ),
         "confidence": min(100, quality),
-        "quality_score": min(100, quality),
     }
