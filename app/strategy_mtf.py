@@ -187,10 +187,15 @@ def analyze_mtf(data, now):
     direction = 1.0 if side == "BUY" else -1.0
     trend_separation = abs(e50[i] - e200[i]) / m15_atr
     trend_slope = direction * (e200[i] - e200[i - 10]) / m15_atr
-    trend_points = 25.0 * (
+    trend_points = 20.0 * (
         0.5 * clamp01(trend_separation / 0.75)
         + 0.5 * clamp01(trend_slope / 0.50)
     )
+
+    # Reward a properly stacked M15 EMA structure; a price merely sitting
+    # above/below EMA200 is not enough to earn a top technical-quality score.
+    m15_ema_stack = direction * (e20[i] - e50[i]) / m15_atr
+    m15_structure_points = 10.0 * clamp01(m15_ema_stack / 0.35)
 
     htf_points = 20.0 if h1_bias == agreeing and h4_bias == agreeing else 12.0
 
@@ -219,10 +224,11 @@ def analyze_mtf(data, now):
     )
 
     rsi_distance = abs(float(rsi_values[i]) - (60.0 if side == "BUY" else 40.0))
-    rsi_points = 15.0 * clamp01(1.0 - rsi_distance / 20.0)
+    rsi_points = 10.0 * clamp01(1.0 - rsi_distance / 20.0)
 
     raw_parts = {
         "trend_strength_and_slope": trend_points,
+        "m15_ema_structure": m15_structure_points,
         "h1_h4_alignment": htf_points,
         "m15_setup_quality": setup_points,
         "m5_trigger_strength": trigger_points,
@@ -233,8 +239,8 @@ def analyze_mtf(data, now):
     score = max(0, min(100, score))
     snapshot["setup"] = setup
     snapshot["quality_score"] = score
-    snapshot["quality_score_type"] = "technical_quality_v2_not_win_probability"
-    snapshot["quality_score_method"] = "continuous_component_score_v2"
+    snapshot["quality_score_type"] = "technical_quality_v3_not_win_probability"
+    snapshot["quality_score_method"] = "continuous_component_score_v3"
     snapshot["quality_score_parts"] = score_parts
 
     # Live mode uses an independent, timestamp-validated spot quote. Historical
