@@ -117,10 +117,30 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self.assertEqual(signal["entry"], 121.06)
         self.assertEqual(snapshot["entry_source"], "test spot feed")
         self.assertEqual(signal["confidence"], snapshot["quality_score"])
-        self.assertEqual(snapshot["quality_score_type"], "technical_quality_not_win_probability")
-        self.assertEqual(sum(snapshot["quality_score_parts"].values()), snapshot["quality_score"])
+        self.assertEqual(snapshot["quality_score_type"], "technical_quality_v2_not_win_probability")
+        self.assertAlmostEqual(sum(snapshot["quality_score_parts"].values()), snapshot["quality_score"], delta=0.6)
+        self.assertEqual(set(snapshot["quality_score_parts"]), {
+            "trend_strength_and_slope", "h1_h4_alignment", "m15_setup_quality",
+            "m5_trigger_strength", "rsi_position",
+        })
         self.assertGreaterEqual(signal["confidence"], 80)
         self.assertLessEqual(signal["confidence"], 100)
+
+
+    def test_quality_score_rewards_stronger_m5_trigger(self):
+        self._make_live_setup()
+        patches = self._patch_indicators()
+        with patches[0], patches[1], patches[2], patches[3]:
+            baseline, signal = analyze_mtf(self.data, self.now + 271)
+        self.assertIsNotNone(signal)
+        self.data["m5"][-1].update({"open": 120.2, "close": 121.4, "high": 121.5})
+        with patches[0], patches[1], patches[2], patches[3]:
+            stronger, stronger_signal = analyze_mtf(self.data, self.now + 271)
+        self.assertIsNotNone(stronger_signal)
+        self.assertGreater(
+            stronger["quality_score_parts"]["m5_trigger_strength"],
+            baseline["quality_score_parts"]["m5_trigger_strength"],
+        )
 
     def test_stale_live_quote_blocks_mtf_signal(self):
         self._make_live_setup(quote_age=120)
