@@ -124,6 +124,21 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
             _, signal = analyze_mtf(self.data, self.now + 120)
         self.assertIsNone(signal)
 
+    def test_rounded_signal_levels_preserve_minimum_two_to_one_rr(self):
+        self._make_live_setup()
+        self.data["live_quote"].update({
+            "price": 121.061, "bid": 121.060, "ask": 121.061,
+        })
+        patches = self._patch_indicators()
+        with patches[0], patches[1], patches[2], patches[3]:
+            _, signal = analyze_mtf(self.data, self.now + 271)
+        self.assertIsNotNone(signal)
+        risk = abs(signal["entry"] - signal["stop_loss"])
+        reward = abs(signal["take_profit"] - signal["entry"])
+        self.assertGreaterEqual(reward / risk, 2.0)
+        self.assertLess(signal["entry"], signal["take_profit_1"])
+        self.assertLess(signal["take_profit_1"], signal["take_profit"])
+
 
     def test_mtf_rejects_live_price_diverged_from_higher_timeframe_candle(self):
         self._make_live_setup()
