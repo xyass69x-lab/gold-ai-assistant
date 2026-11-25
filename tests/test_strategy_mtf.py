@@ -113,7 +113,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         patches = self._patch_indicators()
         with patches[0], patches[1], patches[2], patches[3]:
             snapshot, signal = analyze_mtf(self.data, self.now + 120)
-        self.assertIsNotNone(signal)
+        self.assertIsNotNone(signal, snapshot)
         self.assertEqual(signal["entry"], 121.06)
         self.assertEqual(snapshot["entry_source"], "test spot feed")
 
