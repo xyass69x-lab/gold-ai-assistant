@@ -17,7 +17,7 @@ BASE_URL = "https://datafeed.dukascopy.com/datafeed"
 PRICE_SCALE = 1000.0
 RECORD = struct.Struct(">IIIIIf")
 TIMEOUT_SECONDS = 25
-HISTORY_DAYS = 16
+HISTORY_DAYS = 18
 
 
 def _decode_m1_file(payload, day):
