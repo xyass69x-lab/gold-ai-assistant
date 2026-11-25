@@ -181,12 +181,18 @@ def analyze_mtf(data, now):
         snapshot["setup"] = setup
         return snapshot, None
 
-    score = 25 + 15 + 15
-    score += 20 if h1_bias == agreeing and h4_bias == agreeing else 10
-    score += 15 if rsi_strong else 10
-    score += 10 if body >= 0.35 * m15_atr else 5
+    # Explainable technical-quality score (not a calibrated win probability).
+    score_parts = {
+        "trend_and_setup": 55,  # trend alignment + valid M15 setup + M5 trigger
+        "higher_timeframes": 20 if h1_bias == agreeing and h4_bias == agreeing else 10,
+        "rsi_alignment": 15 if rsi_strong else 10,
+        "candle_strength": 10 if body >= 0.35 * m15_atr else 5,
+    }
+    score = min(100, sum(score_parts.values()))
     snapshot["setup"] = setup
-    snapshot["quality_score"] = min(100, score)
+    snapshot["quality_score"] = score
+    snapshot["quality_score_type"] = "technical_quality_not_win_probability"
+    snapshot["quality_score_parts"] = score_parts
     if score < LIVE_CONFIG["min_score"]:
         return snapshot, None
 
@@ -247,8 +253,9 @@ def analyze_mtf(data, now):
         "symbol": "XAUUSD", "side": side, "entry": entry_out,
         "stop_loss": round(stop, 4), "take_profit_1": round(tp1, 4),
         "take_profit": round(tp2, 4), "timeframe": "M5/M15",
+        "confidence": score,
         "reason": (
             f"{setup} على M15؛ اتجاه H1={h1_bias} وH4={h4_bias}؛ "
-            f"تأكيد دخول M5؛ جودة فنية {score}/100"
+            f"تأكيد دخول M5؛ جودة فنية {score}/100 (ليست احتمال ربح)"
         ),
     }
