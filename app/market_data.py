@@ -10,16 +10,17 @@ from datetime import datetime, timezone
 
 import requests
 
-API_URL = "https://xaus.com/api/v1/chart"
-SYMBOL = "xau"
+API_URL = "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X"
+LIVE_SPOT_URL = "https://xaus.com/api/v1/spot"
+SYMBOL = "XAUUSD=X"
 HEADERS = {"User-Agent": "GoldAIAssistant/2.1", "Accept": "application/json"}
 BASE_INTERVAL = "5m"
 BASE_SECONDS = 5 * 60
 HTF_INTERVAL = "1h"
 HTF_SECONDS = 60 * 60
-BASE_RANGE = "1mo"
+BASE_RANGE = "3mo"
 HTF_RANGE = "3mo"
-BASE_CACHE_SECONDS = 5 * 60
+BASE_CACHE_SECONDS = 60
 HTF_CACHE_SECONDS = 60 * 60
 MAX_BASE_AGE_SECONDS = 15 * 60
 MAX_M15_AGE_SECONDS = 30 * 60
@@ -29,7 +30,8 @@ MIN_BASE_CANDLES = 500
 MIN_M15_CANDLES = 220
 MIN_H1_CANDLES = 60
 MIN_H4_CANDLES = 50
-SOURCE_NAME = "XAUS chart OHLC (Yahoo Finance proxy)"
+SOURCE_NAME = "Yahoo Finance direct OHLC (XAUUSD=X)"
+LIVE_PRICE_SOURCE = "XAUS live spot API"
 INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS}
 _CACHE = {}
 
@@ -68,7 +70,7 @@ def _point_list(payload):
     state = payload.get("data_state")
     if isinstance(state, dict) and state.get("status") in ("stale", "unavailable"):
         raise MarketDataError(
-            f"حالة بيانات XAUS غير صالحة: {state.get('status')}"
+            f"حالة بيانات الشموع غير صالحة: {state.get('status')}"
         )
 
     for key in ("points", "candles", "bars", "data"):
@@ -144,7 +146,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     try:
         response = requests.get(
             API_URL,
-            params={"symbol": SYMBOL, "range": period_range, "interval": interval},
+            params={"range": period_range, "interval": interval},
             headers=HEADERS,
             timeout=20,
         )
@@ -157,12 +159,12 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     except MarketDataError:
         raise
     except (requests.RequestException, ValueError) as exc:
-        raise MarketDataError(f"تعذر جلب بيانات XAUS ({interval}): {str(exc)[:180]}") from exc
+        raise MarketDataError(f"تعذر جلب شموع Yahoo Finance ({interval}): {str(exc)[:180]}") from exc
 
     if not isinstance(payload, dict):
         raise MarketDataError("استجابة XAUS ليست JSON صالحاً")
     if payload.get("error"):
-        raise MarketDataError(f"XAUS: {str(payload['error'])[:180]}")
+        raise MarketDataError(f"Yahoo Finance: {str(payload['error'])[:180]}")
 
     bars = [_validate_bar(point) for point in _point_list(payload)]
     bars = [bar for bar in bars if bar is not None]
@@ -170,7 +172,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     unique = {bar["timestamp"]: bar for bar in bars}
     bars = list(unique.values())
     if not bars:
-        raise MarketDataError(f"لم تصل شموع OHLC صالحة من XAUS ({interval})")
+        raise MarketDataError(f"لم تصل شموع OHLC صالحة من Yahoo Finance ({interval})")
 
     fetched_at = time.time()
     # Refresh the 5m series once per minute and the 1h series at most every 5 minutes.
@@ -181,6 +183,52 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     }
     return bars
 
+
+
+def fetch_live_price(now=None, max_age_seconds=90):
+    """Fetch an independently sourced, timestamp-validated XAUS spot quote."""
+    now = time.time() if now is None else float(now)
+    try:
+        response = requests.get(
+            LIVE_SPOT_URL,
+            params={"compact": "1"},
+            headers=HEADERS,
+            timeout=10,
+        )
+        if response.status_code == 503:
+            raise MarketDataError("مصدر السعر اللحظي XAUS غير متاح (503)")
+        if response.status_code == 429:
+            raise MarketDataError("تجاوز مصدر السعر اللحظي حد الطلبات؛ أوقفنا الإشارات مؤقتاً")
+        response.raise_for_status()
+        payload = response.json()
+    except MarketDataError:
+        raise
+    except (requests.RequestException, ValueError) as exc:
+        raise MarketDataError(f"تعذر جلب السعر اللحظي من XAUS: {str(exc)[:160]}") from exc
+
+    if not isinstance(payload, dict):
+        raise MarketDataError("استجابة السعر اللحظي ليست JSON صالحاً")
+    state = payload.get("data_state") or {}
+    if state.get("status") != "fresh":
+        raise MarketDataError(f"السعر اللحظي غير حديث: {state.get('status', 'unknown')}")
+    try:
+        price = float(payload.get("spot_usd_oz", (payload.get("xau") or {}).get("price")))
+        age = float(state.get("age_seconds"))
+        as_of = payload.get("price_as_of") or state.get("as_of")
+        source_time = _parse_timestamp(as_of)
+    except (TypeError, ValueError, MarketDataError) as exc:
+        raise MarketDataError("بيانات السعر اللحظي أو توقيتها غير مكتملة") from exc
+    measured_age = max(age, now - source_time)
+    if not math.isfinite(price) or price <= 0:
+        raise MarketDataError("السعر اللحظي غير صالح")
+    if measured_age < -5 or measured_age > max_age_seconds:
+        raise MarketDataError(f"السعر اللحظي قديم منذ {int(max(0, measured_age))} ثانية")
+    return {
+        "price": price,
+        "age_seconds": int(max(0, measured_age)),
+        "as_of": datetime.fromtimestamp(source_time, timezone.utc).isoformat(),
+        "source": LIVE_PRICE_SOURCE,
+    }
 
 def _closed_only(candles, seconds, now):
     return [
@@ -216,8 +264,8 @@ def resample_candles(candles, source_seconds, target_seconds):
     return output
 
 
-def fetch_market_data(force_refresh=False, now=None):
-    """Return M5, derived M15, H1 and derived H4 after freshness checks."""
+def fetch_market_data(force_refresh=False, now=None, include_live_quote=True):
+    """Return independent Yahoo OHLC candles and an optional fresh XAUS spot quote."""
     now = time.time() if now is None else float(now)
     m5_raw = _fetch_chart(BASE_INTERVAL, BASE_RANGE, BASE_CACHE_SECONDS, force_refresh)
     h1_raw = _fetch_chart(HTF_INTERVAL, HTF_RANGE, HTF_CACHE_SECONDS, force_refresh)
@@ -273,6 +321,8 @@ def fetch_market_data(force_refresh=False, now=None):
     return {
         "symbol": "XAUUSD",
         "source": SOURCE_NAME,
+        "live_price_source": LIVE_PRICE_SOURCE,
+        "live_quote": fetch_live_price(now=now) if include_live_quote else None,
         "m5": m5_raw,
         "m15": m15_raw,
         "h1": h1_raw,
