@@ -12,6 +12,7 @@ from app.market_data import (
     MarketDataError,
     _closed_only,
     _point_list,
+    _validate_bar,
     fetch_market_data,
     resample_candles,
 )
@@ -38,7 +39,10 @@ def _fetch_yahoo_gc_history(now):
     except (requests.RequestException, ValueError) as exc:
         raise MarketDataError(f"Yahoo GC=F historical request failed: {str(exc)[:160]}") from exc
 
-    bars = _closed_only(_point_list(payload), 300, now)
+    bars = [_validate_bar(row) for row in _point_list(payload)]
+    bars = [bar for bar in bars if bar is not None]
+    bars.sort(key=lambda bar: bar["timestamp"])
+    bars = _closed_only(bars, 300, now)
     if len(bars) < MIN_PROXY_CANDLES:
         raise MarketDataError(f"Yahoo GC=F history is short ({len(bars)} closed M5 bars)")
     m15 = resample_candles(bars, 300, 900)
