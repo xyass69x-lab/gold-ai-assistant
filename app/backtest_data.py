@@ -60,7 +60,7 @@ def fetch_backtest_dataset():
     # The public preview is limited; these windows provide >1200 M5 bars
     # and enough H1 history for the strategy's H4 bias calculation.
     m5 = fetch_historical_bars("M5", "2026-10-23", "2026-10-30")
-    h1 = fetch_historical_bars("H1", "2026-10-20", "2026-10-30")
+    h1 = fetch_historical_bars("H1", "2026-10-15", "2026-10-30")
     m15 = resample_candles(m5, 300, 900)
     h4 = resample_candles(h1, 3600, 14400)
     if len(m5) < 1200:
