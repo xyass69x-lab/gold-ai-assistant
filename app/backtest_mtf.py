@@ -102,10 +102,10 @@ def _spearman_score_outcome(trades):
     return covariance / (variance_x * variance_y) ** 0.5
 
 
-def _quality_band_report(trades, cost_r, minimum_sample=20):
+def _quality_band_report(trades, cost_r, minimum_sample=20, label="العينة"):
     """Report score bands and score/outcome rank association without overclaiming."""
     bands = ((0, 49), (50, 59), (60, 69), (70, 79), (80, 89), (90, 100))
-    lines = ["نتائج الإصدار v2 حسب الجودة الفنية (الدرجة ليست احتمال ربح):"]
+    lines = [f"تحليل الجودة الفنية v2 — {label} (الدرجة ليست احتمال ربح):"]
     for low, high in bands:
         group = [t for t in trades if low <= t.get("quality_score", -1) <= high]
         m = _metrics(group, cost_r)
@@ -200,7 +200,8 @@ def run_backtest_report(data=None):
         *([_fmt("التطوير", train, cost_r), _fmt("الاختبار المستقل OOS", test, cost_r)] if split is not None else []),
         _fmt("كل العينة بعد الإحماء", trades, cost_r),
         "",
-        *_quality_band_report(trades, cost_r),
+        *(_quality_band_report(train, cost_r, label="التطوير") if split is not None else []),
+        *(_quality_band_report(test, cost_r, label="الاختبار المستقل OOS") if split is not None else _quality_band_report(trades, cost_r, label="استكشافي — لا يوجد تقسيم OOS")),
         "",
         "البيانات التاريخية مرجعية وقد تختلف عن تسعير XTB؛ لا يحاكي الاختبار السبريد والانزلاق بدقة ما لم تُعاير تكلفة R.",
         "النتائج ليست ضماناً للأداء المستقبلي ولا تمثل التنفيذ الفعلي.",
