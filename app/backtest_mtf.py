@@ -77,7 +77,11 @@ def run_backtest_report():
     i = 700
     split = int(len(candles) * TRAIN_FRACTION)
     while i < len(candles) - 1:
-        now = int(candles[i]["timestamp"]) + 300
+        # Evaluate at the start of the next M5 candle, after it has opened.
+        # Candle i is closed; candle i+1 supplies only its opening price.
+        # This mirrors the live 90-second rule without using its H/L/C.
+        next_candle = candles[i + 1]
+        now = int(next_candle["timestamp"]) + 30
         snapshot, signal = analyze_mtf(data, now)
         if not signal:
             i += 1
