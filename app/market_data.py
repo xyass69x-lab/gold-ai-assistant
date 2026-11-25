@@ -1,145 +1,175 @@
-"""Free-tier Twelve Data adapter for validated multi-timeframe XAU/USD candles.
+"""XAUS-backed XAU/USD OHLC adapter with strict freshness and completeness checks.
 
-The live application is switched to this module only after its provider access is
-verified. It deliberately fails closed: stale, incomplete, malformed, or
-insufficient data never becomes a trade signal.
+XAUS exposes free chart OHLC data without an API key. Its chart endpoint is a
+Yahoo Finance proxy, so these candles are reference data, not XTB execution quotes.
+The engine fails closed whenever bars are stale, malformed, or insufficient.
 """
 import math
-import os
 import time
 from datetime import datetime, timezone
 
 import requests
 
-API_URL = "https://api.twelvedata.com/time_series"
-SYMBOL = "XAU/USD"
-HEADERS = {"User-Agent": "GoldAIAssistant/2.0", "Accept": "application/json"}
-BASE_INTERVAL = "5min"
-BASE_SECONDS = 300
-SETUP_INTERVAL = "15min"
-SETUP_SECONDS = 15 * 60
-HTF_INTERVAL = "4h"
-HTF_SECONDS = 4 * 60 * 60
-BASE_CACHE_SECONDS = 5 * 60
-SETUP_CACHE_SECONDS = 15 * 60
-HTF_CACHE_SECONDS = 4 * 60 * 60
-INTERVAL_SECONDS = {BASE_INTERVAL: BASE_SECONDS, SETUP_INTERVAL: SETUP_SECONDS, HTF_INTERVAL: HTF_SECONDS}
+API_URL = "https://xaus.com/api/v1/chart"
+SYMBOL = "xau"
+HEADERS = {"User-Agent": "GoldAIAssistant/2.1", "Accept": "application/json"}
+BASE_INTERVAL = "5m"
+BASE_SECONDS = 5 * 60
+HTF_INTERVAL = "1h"
+HTF_SECONDS = 60 * 60
+BASE_RANGE = "5d"
+HTF_RANGE = "3mo"
+BASE_CACHE_SECONDS = 60
+HTF_CACHE_SECONDS = 5 * 60
 MAX_BASE_AGE_SECONDS = 15 * 60
-MAX_HTF_AGE_SECONDS = 8 * 60 * 60
+MAX_M15_AGE_SECONDS = 30 * 60
+MAX_H1_AGE_SECONDS = 2 * 60 * 60
+MAX_H4_AGE_SECONDS = 8 * 60 * 60
 MIN_BASE_CANDLES = 500
-MIN_H4_CANDLES = 60
+MIN_M15_CANDLES = 220
+MIN_H1_CANDLES = 60
+MIN_H4_CANDLES = 50
+SOURCE_NAME = "XAUS chart OHLC (Yahoo Finance proxy)"
 _CACHE = {}
-_LAST_REQUEST_AT = 0.0
-_RATE_LIMIT_UNTIL = 0.0
 
 
 class MarketDataError(RuntimeError):
     pass
 
 
-def _next_cache_expiry(interval, now):
-    """Expire just after the next UTC candle boundary to refresh once per bar."""
-    period = INTERVAL_SECONDS[interval]
-    return (int(now) // period + 1) * period + 5
-
-
-def _parse_time(value):
+def _parse_timestamp(value):
     try:
+        if isinstance(value, (int, float)):
+            stamp = float(value)
+            if stamp > 10_000_000_000:
+                stamp /= 1000.0
+            if not math.isfinite(stamp) or stamp <= 0:
+                raise ValueError("invalid unix timestamp")
+            return int(stamp)
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return int(parsed.timestamp())
     except (TypeError, ValueError, OverflowError) as exc:
-        raise MarketDataError("مزود البيانات أعاد توقيت شمعة غير صالح") from exc
+        raise MarketDataError("مزود XAUS أعاد توقيت شمعة غير صالح") from exc
+
+
+def _point_list(payload):
+    """Accept the documented points array and common wrapped chart responses."""
+    if not isinstance(payload, dict):
+        raise MarketDataError("استجابة XAUS ليست JSON object صالحاً")
+    state = payload.get("data_state")
+    if isinstance(state, dict) and state.get("status") in ("stale", "unavailable"):
+        raise MarketDataError(
+            f"حالة بيانات XAUS غير صالحة: {state.get('status')}"
+        )
+
+    for key in ("points", "candles", "bars", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+
+    # Be defensive if the upstream proxy ever returns Yahoo's native chart shape.
+    chart = payload.get("chart") or payload
+    results = chart.get("result") if isinstance(chart, dict) else None
+    if isinstance(results, list) and results:
+        result = results[0]
+        timestamps = result.get("timestamp") or []
+        indicators = result.get("indicators") or {}
+        quotes = indicators.get("quote") or []
+        quote = quotes[0] if quotes else {}
+        output = []
+        for i, stamp in enumerate(timestamps):
+            try:
+                output.append({
+                    "t": stamp,
+                    "o": quote.get("open", [])[i],
+                    "h": quote.get("high", [])[i],
+                    "l": quote.get("low", [])[i],
+                    "c": quote.get("close", [])[i],
+                    "v": (quote.get("volume") or [None] * len(timestamps))[i],
+                })
+            except (IndexError, TypeError):
+                continue
+        return output
+
+    raise MarketDataError("استجابة XAUS لا تحتوي على مصفوفة شموع OHLC معروفة")
 
 
 def _validate_bar(item):
+    if not isinstance(item, dict):
+        return None
     try:
-        values = [float(item[key]) for key in ("open", "high", "low", "close")]
+        timestamp = _parse_timestamp(
+            item.get("timestamp", item.get("t", item.get("time", item.get("datetime"))))
+        )
+        values = [
+            float(item.get("open", item.get("o"))),
+            float(item.get("high", item.get("h"))),
+            float(item.get("low", item.get("l"))),
+            float(item.get("close", item.get("c"))),
+        ]
         if not all(math.isfinite(v) and v > 0 for v in values):
             return None
         op, high, low, close = values
         if high < max(op, close, low) or low > min(op, close, high):
             return None
+        volume = item.get("volume", item.get("v"))
         return {
-            "timestamp": _parse_time(item["datetime"]),
-            "open": op, "high": high, "low": low, "close": close,
-            "volume": item.get("volume"),
+            "timestamp": timestamp,
+            "open": op,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
         }
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except (KeyError, TypeError, ValueError, OverflowError, MarketDataError):
         return None
 
 
-def _fetch_interval(interval, outputsize, cache_seconds, force=False):
-    global _LAST_REQUEST_AT, _RATE_LIMIT_UNTIL
+def _fetch_chart(interval, period_range, cache_seconds, force=False):
     now = time.time()
-    cached = _CACHE.get(interval)
-    if not force and cached and now < cached.get("expires_at", cached["fetched_at"] + cache_seconds):
+    cache_key = (interval, period_range)
+    cached = _CACHE.get(cache_key)
+    if not force and cached and now < cached["expires_at"]:
         return list(cached["candles"])
 
-    if now < _RATE_LIMIT_UNTIL:
-        remaining = max(1, int(_RATE_LIMIT_UNTIL - now))
-        raise MarketDataError(f"حصة Twelve Data موقوفة مؤقتاً؛ أعد المحاولة بعد {remaining} ثانية.")
-
-    api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
-    if not api_key:
-        raise MarketDataError(
-            "مفتاح TWELVE_DATA_API_KEY غير مضبوط في Render Environment."
-        )
-
-    # Keep requests well below the free Basic plan's per-minute ceiling.
-    wait = 8.0 - (now - _LAST_REQUEST_AT)
-    if wait > 0:
-        time.sleep(wait)
-
-    params = {
-        "symbol": SYMBOL, "interval": interval, "outputsize": outputsize,
-        "timezone": "UTC", "apikey": api_key,
-    }
     try:
-        response = requests.get(API_URL, params=params, headers=HEADERS, timeout=25)
-        _LAST_REQUEST_AT = time.time()
+        response = requests.get(
+            API_URL,
+            params={"symbol": SYMBOL, "range": period_range, "interval": interval},
+            headers=HEADERS,
+            timeout=20,
+        )
         if response.status_code == 429:
-            retry = response.headers.get("Retry-After", "")
-            try:
-                cooldown = max(60, min(3600, int(retry)))
-            except (TypeError, ValueError):
-                cooldown = 900
-            _RATE_LIMIT_UNTIL = time.time() + cooldown
-            raise MarketDataError(
-                "وصلنا حد طلبات Twelve Data المجاني (429). "
-                f"تم إيقاف إعادة المحاولة لمدة {cooldown // 60} دقيقة لحماية الحصة."
-            )
+            raise MarketDataError("وصل XAUS إلى حد الطلبات المؤقت؛ أوقفنا الإشارات لحين التعافي.")
+        if response.status_code == 503:
+            raise MarketDataError("مصدر XAUS لا يملك بيانات سوق متاحة حالياً (503).")
         response.raise_for_status()
         payload = response.json()
     except MarketDataError:
         raise
     except (requests.RequestException, ValueError) as exc:
-        raise MarketDataError(f"تعذر جلب بيانات {interval}: {str(exc)[:180]}") from exc
+        raise MarketDataError(f"تعذر جلب بيانات XAUS ({interval}): {str(exc)[:180]}") from exc
 
     if not isinstance(payload, dict):
-        raise MarketDataError("استجابة مزود البيانات ليست JSON صالحاً")
-    if payload.get("status") == "error" or payload.get("code"):
-        message = payload.get("message") or payload.get("message_detail") or str(payload)
-        raise MarketDataError(f"Twelve Data ({interval}): {str(message)[:220]}")
+        raise MarketDataError("استجابة XAUS ليست JSON صالحاً")
+    if payload.get("error"):
+        raise MarketDataError(f"XAUS: {str(payload['error'])[:180]}")
 
-    meta = payload.get("meta") or {}
-    symbol = str(meta.get("symbol") or SYMBOL).upper().replace(" ", "")
-    if symbol not in ("XAU/USD", "XAUUSD"):
-        raise MarketDataError(f"رمز غير متوقع من مزود البيانات: {symbol}")
-
-    bars = [_validate_bar(item) for item in (payload.get("values") or [])]
+    bars = [_validate_bar(point) for point in _point_list(payload)]
     bars = [bar for bar in bars if bar is not None]
     bars.sort(key=lambda bar: bar["timestamp"])
     unique = {bar["timestamp"]: bar for bar in bars}
     bars = list(unique.values())
     if not bars:
-        raise MarketDataError(f"لم تصل شموع صالحة من Twelve Data ({interval})")
+        raise MarketDataError(f"لم تصل شموع OHLC صالحة من XAUS ({interval})")
 
     fetched_at = time.time()
-    _CACHE[interval] = {
+    # Refresh the 5m series once per minute and the 1h series at most every 5 minutes.
+    _CACHE[cache_key] = {
         "fetched_at": fetched_at,
-        "expires_at": _next_cache_expiry(interval, fetched_at),
+        "expires_at": fetched_at + cache_seconds,
         "candles": list(bars),
     }
     return bars
@@ -180,53 +210,69 @@ def resample_candles(candles, source_seconds, target_seconds):
 
 
 def fetch_market_data(force_refresh=False, now=None):
-    """Return raw M5/M15/H4 bars plus closed-bar validation and derived H1."""
+    """Return M5, derived M15, H1 and derived H4 after freshness checks."""
     now = time.time() if now is None else float(now)
-    m5_raw = _fetch_interval(BASE_INTERVAL, 5000, BASE_CACHE_SECONDS, force_refresh)
-    m15_raw = _fetch_interval(SETUP_INTERVAL, 5000, SETUP_CACHE_SECONDS, force_refresh)
-    h4_raw = _fetch_interval(HTF_INTERVAL, 500, HTF_CACHE_SECONDS, force_refresh)
-    m5_closed = _closed_only(m5_raw, BASE_SECONDS, now)
-    m15_closed = _closed_only(m15_raw, SETUP_SECONDS, now)
-    h4_closed = _closed_only(h4_raw, HTF_SECONDS, now)
+    m5_raw = _fetch_chart(BASE_INTERVAL, BASE_RANGE, BASE_CACHE_SECONDS, force_refresh)
+    h1_raw = _fetch_chart(HTF_INTERVAL, HTF_RANGE, HTF_CACHE_SECONDS, force_refresh)
 
+    m5_closed = _closed_only(m5_raw, BASE_SECONDS, now)
+    h1_closed = _closed_only(h1_raw, HTF_SECONDS, now)
     if not m5_closed:
-        raise MarketDataError("لا توجد شموع M5 مغلقة")
+        raise MarketDataError("لا توجد شموع M5 مغلقة من XAUS")
+    if not h1_closed:
+        raise MarketDataError("لا توجد شموع H1 مغلقة من XAUS")
+
     m5_age = now - (m5_closed[-1]["timestamp"] + BASE_SECONDS)
+    h1_age = now - (h1_closed[-1]["timestamp"] + HTF_SECONDS)
     if m5_age < 0 or m5_age > MAX_BASE_AGE_SECONDS:
         raise MarketDataError(
-            f"شموع M5 قديمة منذ {int(max(0, m5_age) / 60)} دقيقة؛ أوقفنا الإشارات."
+            f"بيانات M5 من XAUS قديمة منذ {int(max(0, m5_age) / 60)} دقيقة؛ أوقفنا الإشارات."
         )
+    if h1_age < 0 or h1_age > MAX_H1_AGE_SECONDS:
+        raise MarketDataError("آخر شمعة H1 من XAUS قديمة؛ أوقفنا الإشارات.")
     if len(m5_closed) < MIN_BASE_CANDLES:
         raise MarketDataError(
             f"بيانات M5 غير كافية: {len(m5_closed)} شمعة، نحتاج {MIN_BASE_CANDLES}."
         )
-    m15_age = now - (m15_closed[-1]["timestamp"] + SETUP_SECONDS) if m15_closed else float("inf")
-    if not m15_closed or m15_age < 0 or m15_age > 30 * 60:
-        raise MarketDataError("بيانات M15 غير متاحة أو قديمة؛ أوقفنا الإشارات.")
-    if len(m15_closed) < 220:
-        raise MarketDataError(f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج 220.")
+    if len(h1_closed) < MIN_H1_CANDLES:
+        raise MarketDataError(
+            f"بيانات H1 غير كافية: {len(h1_closed)} شمعة، نحتاج {MIN_H1_CANDLES}."
+        )
+
+    m15_raw = resample_candles(m5_raw, BASE_SECONDS, 15 * 60)
+    h4_raw = resample_candles(h1_raw, HTF_SECONDS, 4 * HTF_SECONDS)
+    m15_closed = _closed_only(m15_raw, 15 * 60, now)
+    h4_closed = _closed_only(h4_raw, 4 * HTF_SECONDS, now)
+    if not m15_closed:
+        raise MarketDataError("تعذر تكوين شموع M15 كاملة من بيانات XAUS")
     if not h4_closed:
-        raise MarketDataError("لا توجد شموع H4 مغلقة")
-    h4_age = now - (h4_closed[-1]["timestamp"] + HTF_SECONDS)
-    if h4_age < 0 or h4_age > MAX_HTF_AGE_SECONDS:
-        raise MarketDataError("آخر شمعة H4 قديمة؛ أوقفنا الإشارات.")
+        raise MarketDataError("تعذر تكوين شموع H4 كاملة من بيانات XAUS")
+
+    m15_age = now - (m15_closed[-1]["timestamp"] + 15 * 60)
+    h4_age = now - (h4_closed[-1]["timestamp"] + 4 * HTF_SECONDS)
+    if m15_age < 0 or m15_age > MAX_M15_AGE_SECONDS:
+        raise MarketDataError("آخر شمعة M15 مشتقة قديمة؛ أوقفنا الإشارات.")
+    if h4_age < 0 or h4_age > MAX_H4_AGE_SECONDS:
+        raise MarketDataError("آخر شمعة H4 مشتقة قديمة؛ أوقفنا الإشارات.")
+    if len(m15_closed) < MIN_M15_CANDLES:
+        raise MarketDataError(
+            f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج {MIN_M15_CANDLES}."
+        )
     if len(h4_closed) < MIN_H4_CANDLES:
         raise MarketDataError(
             f"بيانات H4 غير كافية: {len(h4_closed)} شمعة، نحتاج {MIN_H4_CANDLES}."
         )
 
-    h1 = resample_candles(m15_raw, SETUP_SECONDS, 60 * 60)
-    if len(m15_closed) < 220 or len(h1) < 60:
-        raise MarketDataError(
-            f"التغطية متعددة الأطر غير كافية (M15={len(m15_closed)}, H1={len(h1)})."
-        )
-
     return {
         "symbol": "XAUUSD",
-        "source": "Twelve Data XAU/USD spot",
-        "m5": m5_raw, "m15": m15_raw, "h1": h1, "h4": h4_raw,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "source": SOURCE_NAME,
+        "m5": m5_raw,
+        "m15": m15_raw,
+        "h1": h1_raw,
+        "h4": h4_raw,
+        "checked_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
         "m5_age_seconds": int(max(0, m5_age)),
         "m15_age_seconds": int(max(0, m15_age)),
+        "h1_age_seconds": int(max(0, h1_age)),
         "h4_age_seconds": int(max(0, h4_age)),
     }
