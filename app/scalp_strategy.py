@@ -55,10 +55,11 @@ def analyze_scalp(data, now, snapshot=None):
     if live_quote is not None:
         quote_age = float(live_quote.get("age_seconds", float("inf")))
         candle_age = max(0.0, now - (int(current["timestamp"]) + 300))
-        entry = float(live_quote.get("price", 0.0))
+        mid = float(live_quote.get("price", 0.0))
+        entry = float(live_quote.get("ask") if side == "BUY" else live_quote.get("bid"))
         max_extension = max(0.5 * float(atr_values[i]), 1.0)
-        if (quote_age > 90 or candle_age > 600 or entry <= 0
-                or abs(entry - float(current["close"])) > max_extension):
+        if (quote_age > 45 or candle_age > 600 or mid <= 0 or entry <= 0
+                or abs(mid - float(current["close"])) > max_extension):
             return None
     else:
         next_ts = int(current["timestamp"]) + 300
