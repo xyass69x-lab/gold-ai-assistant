@@ -1,4 +1,5 @@
 from app.scalp_strategy import analyze_scalp
+from app.main import Signal, validate_signal
 
 
 def _bar(ts, o, h, l, c):
@@ -41,3 +42,14 @@ def test_scalp_returns_rr_two_and_valid_levels_when_confirmed():
     assert signal["take_profit"] > signal["entry"] > signal["stop_loss"]
     assert round((signal["take_profit"] - signal["entry"]) /
                  (signal["entry"] - signal["stop_loss"]), 2) == 2.0
+
+
+def test_scalp_signal_passes_application_schema_and_rr_validation():
+    signal = {
+        "symbol": "XAUUSD", "side": "BUY", "entry": 3500.0,
+        "stop_loss": 3490.0, "take_profit_1": 3510.0,
+        "take_profit": 3520.0, "timeframe": "M5 SCALP",
+        "reason": "M5 scalp confirmation", "confidence": 84,
+    }
+    parsed = Signal(**signal)
+    assert validate_signal(parsed) == 2.0
