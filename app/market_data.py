@@ -19,8 +19,8 @@ HTF_INTERVAL = "1h"
 HTF_SECONDS = 60 * 60
 BASE_RANGE = "5d"
 HTF_RANGE = "3mo"
-BASE_CACHE_SECONDS = 60
-HTF_CACHE_SECONDS = 5 * 60
+BASE_CACHE_SECONDS = 5 * 60
+HTF_CACHE_SECONDS = 60 * 60
 MAX_BASE_AGE_SECONDS = 15 * 60
 MAX_M15_AGE_SECONDS = 30 * 60
 MAX_H1_AGE_SECONDS = 2 * 60 * 60
@@ -30,11 +30,18 @@ MIN_M15_CANDLES = 220
 MIN_H1_CANDLES = 60
 MIN_H4_CANDLES = 50
 SOURCE_NAME = "XAUS chart OHLC (Yahoo Finance proxy)"
+INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS}
 _CACHE = {}
 
 
 class MarketDataError(RuntimeError):
     pass
+
+
+def _next_cache_expiry(interval, now):
+    """Expire just after the next UTC candle boundary."""
+    period = INTERVAL_SECONDS[interval]
+    return (int(now) // period + 1) * period + 5
 
 
 def _parse_timestamp(value):
@@ -169,7 +176,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     # Refresh the 5m series once per minute and the 1h series at most every 5 minutes.
     _CACHE[cache_key] = {
         "fetched_at": fetched_at,
-        "expires_at": fetched_at + cache_seconds,
+        "expires_at": _next_cache_expiry(interval, fetched_at),
         "candles": list(bars),
     }
     return bars
