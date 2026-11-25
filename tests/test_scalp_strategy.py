@@ -24,8 +24,8 @@ def test_scalp_returns_rr_two_and_valid_levels_when_confirmed():
     price = 100.0
     for i in range(80):
         op = price
-        price += 0.12
-        bars.append(_bar(i * 300, op, price + 0.05, op - 0.05, price))
+        price += [0.13, -0.08, 0.13, -0.08, -0.08][i % 5]
+        bars.append(_bar(i * 300, op, max(op, price) + 0.05, min(op, price) - 0.05, price))
     # Strong final completed bullish candle breaks the prior high.
     last = bars[-1]
     last.update({"open": last["close"] - 0.25, "low": last["close"] - 0.30,
