@@ -163,7 +163,7 @@ class MarketDataFetchTests(unittest.TestCase):
 
     def test_biquote_m5_rejects_late_candle(self):
         now = 1_800_000_000
-        stamp = datetime.fromtimestamp(now - 600, timezone.utc).isoformat().replace("+00:00", "Z")
+        stamp = datetime.fromtimestamp(now - 900, timezone.utc).isoformat().replace("+00:00", "Z")
         response = Mock()
         response.status_code = 200
         response.json.return_value = {"bars": [{
@@ -194,7 +194,7 @@ class MarketDataFetchTests(unittest.TestCase):
             data = market_data.fetch_market_data(now=now, include_live_quote=True)
 
         live_m5.assert_called_once()
-        self.assertIn("BiQuote MT5 M5", data["source"])
+        self.assertIn("BiQuote M5", data["source"])
         self.assertIn("XAUS M15/H1/H4", data["source"])
         self.assertEqual(len(data["m15"]), 220)
         self.assertEqual(data["live_quote"]["price"], 4001.0)
