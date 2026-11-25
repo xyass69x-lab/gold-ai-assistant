@@ -121,7 +121,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self._make_live_setup(quote_age=120)
         patches = self._patch_indicators()
         with patches[0], patches[1], patches[2], patches[3]:
-            _, signal = analyze_mtf(self.data, self.now + 240)
+            _, signal = analyze_mtf(self.data, self.now + 120)
         self.assertIsNone(signal)
 
 
@@ -132,7 +132,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         })
         patches = self._patch_indicators()
         with patches[0], patches[1], patches[2], patches[3]:
-            snapshot, signal = analyze_mtf(self.data, self.now + 240)
+            snapshot, signal = analyze_mtf(self.data, self.now + 120)
         self.assertIsNone(signal)
         self.assertIn("diverged", snapshot["entry_reject_reason"])
 
