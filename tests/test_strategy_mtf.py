@@ -89,8 +89,8 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
             "open": 120.5, "high": 121.2, "low": 120.4, "close": 121.0,
         })
         self.data["live_quote"] = {
-            "price": 121.05, "age_seconds": quote_age,
-            "source": "test spot feed",
+            "price": 121.05, "bid": 121.04, "ask": 121.06,
+            "age_seconds": quote_age, "source": "test spot feed",
         }
         self.data["m5_age_seconds"] = 240
 
@@ -114,7 +114,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         with patches[0], patches[1], patches[2], patches[3]:
             snapshot, signal = analyze_mtf(self.data, self.now + 240)
         self.assertIsNotNone(signal)
-        self.assertEqual(signal["entry"], 121.05)
+        self.assertEqual(signal["entry"], 121.06)
         self.assertEqual(snapshot["entry_source"], "test spot feed")
 
     def test_stale_live_quote_blocks_mtf_signal(self):
