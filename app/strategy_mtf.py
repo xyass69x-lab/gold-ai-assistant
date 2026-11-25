@@ -3,7 +3,6 @@ import math
 from bisect import bisect_right
 
 LIVE_CONFIG = {
-    "min_score": 80,
     "breakout_lookback": 20,
     "pullback_atr_tolerance": 0.15,
     "min_body_atr": 0.25,
@@ -181,20 +180,62 @@ def analyze_mtf(data, now):
         snapshot["setup"] = setup
         return snapshot, None
 
-    # Explainable technical-quality score (not a calibrated win probability).
-    score_parts = {
-        "trend_and_setup": 55,  # trend alignment + valid M15 setup + M5 trigger
-        "higher_timeframes": 20 if h1_bias == agreeing and h4_bias == agreeing else 10,
-        "rsi_alignment": 15 if rsi_strong else 10,
-        "candle_strength": 10 if body >= 0.35 * m15_atr else 5,
+    # Version 2 score: continuous, component-based and deliberately NOT an
+    # entry gate. It ranks setup quality for research; only out-of-sample
+    # calibration may justify a future threshold.
+    clamp01 = lambda value: max(0.0, min(1.0, float(value)))
+    direction = 1.0 if side == "BUY" else -1.0
+    trend_separation = abs(e50[i] - e200[i]) / m15_atr
+    trend_slope = direction * (e200[i] - e200[i - 10]) / m15_atr
+    trend_points = 25.0 * (
+        0.5 * clamp01(trend_separation / 0.75)
+        + 0.5 * clamp01(trend_slope / 0.50)
+    )
+
+    htf_points = 20.0 if h1_bias == agreeing and h4_bias == agreeing else 12.0
+
+    if setup == "PULLBACK":
+        touch_distance = (
+            abs(current["low"] - e20[i]) if side == "BUY"
+            else abs(current["high"] - e20[i])
+        ) / m15_atr
+        setup_points = 12.0 + 8.0 * clamp01(1.0 - touch_distance / 0.60)
+    else:
+        breakout_level = max(x["high"] for x in prior) if side == "BUY" else min(x["low"] for x in prior)
+        breakout_clearance = direction * (current["close"] - breakout_level) / m15_atr
+        setup_points = (
+            10.0 + 5.0 * clamp01(breakout_clearance / 0.50)
+            + 5.0 * clamp01((body / m15_atr) / 1.00)
+        )
+
+    m5_body_ratio = abs(last_m5["close"] - last_m5["open"]) / m5_atr
+    m5_clearance = (
+        (last_m5["close"] - previous_m5["high"]) if side == "BUY"
+        else (previous_m5["low"] - last_m5["close"])
+    ) / m5_atr
+    trigger_points = (
+        10.0 * clamp01(m5_body_ratio / 0.60)
+        + 10.0 * clamp01(m5_clearance / 0.40)
+    )
+
+    rsi_distance = abs(float(rsi_values[i]) - (60.0 if side == "BUY" else 40.0))
+    rsi_points = 15.0 * clamp01(1.0 - rsi_distance / 20.0)
+
+    raw_parts = {
+        "trend_strength_and_slope": trend_points,
+        "h1_h4_alignment": htf_points,
+        "m15_setup_quality": setup_points,
+        "m5_trigger_strength": trigger_points,
+        "rsi_position": rsi_points,
     }
-    score = min(100, sum(score_parts.values()))
+    score_parts = {name: round(value, 1) for name, value in raw_parts.items()}
+    score = int(round(sum(score_parts.values())))
+    score = max(0, min(100, score))
     snapshot["setup"] = setup
     snapshot["quality_score"] = score
-    snapshot["quality_score_type"] = "technical_quality_not_win_probability"
+    snapshot["quality_score_type"] = "technical_quality_v2_not_win_probability"
+    snapshot["quality_score_method"] = "continuous_component_score_v2"
     snapshot["quality_score_parts"] = score_parts
-    if score < LIVE_CONFIG["min_score"]:
-        return snapshot, None
 
     # Live mode uses an independent, timestamp-validated spot quote. Historical
     # tests/backtests intentionally omit live_quote and use the next candle open.
