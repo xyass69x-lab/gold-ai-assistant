@@ -68,8 +68,8 @@ def _fmt(label, trades, cost_r):
 
 
 def run_backtest_report(data=None):
-    # Backtests use the same XAUS candle feed as live analysis, but never fetch
-    # or reuse the independent BiQuote live quote.
+    # Backtests prefer extended Yahoo GC=F futures history and fall back to XAUS spot;
+    # they never fetch or reuse the live BiQuote quote.
     if data is None:
         data = fetch_historical_market_data()
     # Never allow the current live quote to leak into historical simulation.
@@ -132,7 +132,8 @@ def run_backtest_report(data=None):
         *([_fmt("التطوير", train, cost_r), _fmt("الاختبار المستقل OOS", test, cost_r)] if split is not None else []),
         _fmt("كل العينة بعد الإحماء", trades, cost_r),
         "",
-        "النتائج تاريخية وليست ضماناً للأداء المستقبلي. بيانات المزود قد تختلف عن XTB،",
+        "GC=F عقود ذهب COMEX وليست XAUUSD spot؛ تُستخدم كمرجع تاريخي فقط. النتائج ليست ضماناً للأداء،",
+        "وبيانات المزود قد تختلف عن XTB، كما لا يحاكي الاختبار السبريد والانزلاق بدقة ما لم تُعاير تكلفة R.",
         "والاختبار لا يمثل التنفيذ الفعلي أو السبريد والانزلاق بدقة ما لم تُعاير تكلفة R.",
         "عند أقل من 3000 شمعة، لا تُعرض نتيجة OOS لأن فترة الإحماء تستهلك معظم العينة؛ نحتاج تاريخاً أطول قبل اعتماد الأداء.",
     ]
