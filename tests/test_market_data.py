@@ -129,7 +129,7 @@ class MarketDataFetchTests(unittest.TestCase):
     def test_stale_independent_spot_quote_is_rejected(self):
         now = 1_800_000_000
         as_of = datetime.fromtimestamp(now - 240, timezone.utc).isoformat()
-        response = unittest.mock.Mock()
+        response = Mock()
         response.status_code = 200
         response.json.return_value = {
             "bid": 4012.4, "ask": 4012.6, "mid": 4012.5,
