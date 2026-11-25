@@ -10,8 +10,8 @@ def test_scalp_requires_next_candle_open():
     price = 100.0
     for i in range(80):
         op = price
-        price += 0.12
-        bars.append(_bar(i * 300, op, price + 0.05, op - 0.05, price))
+        price += (0.16 if i % 2 == 0 else -0.08)
+        bars.append(_bar(i * 300, op, max(op, price) + 0.05, min(op, price) - 0.05, price))
     now = bars[-1]["timestamp"] + 300 + 10
     data = {"m5": bars, "h1": [], "h4": []}
     snapshot = {"higher_timeframe_bias": {"h1": "BULLISH", "h4": "BULLISH"}}
