@@ -735,7 +735,9 @@ def run_engine_once():
     if snapshot["candle_at"] != previous_candle:
         print(
             "MARKET_ENGINE_OK "
-            f"source={snapshot['source']} price={snapshot['price']:.3f} "
+            f"candle_source={snapshot['source']} close={snapshot['price']:.3f} "
+            f"live_source={snapshot.get('live_price_source')} live_mid={snapshot.get('live_price')} "
+            f"live_age_seconds={snapshot.get('live_price_age_seconds')} "
             f"M5={len(market_data['m5'])} M15={len(market_data['m15'])} "
             f"H1={len(market_data['h1'])} H4={len(market_data['h4'])} "
             f"candle_age_seconds={snapshot['candle_age_seconds']}",
@@ -748,6 +750,8 @@ def run_engine_once():
         "live_price_source": snapshot.get("live_price_source"),
         "live_price": snapshot.get("live_price"),
         "live_price_age_seconds": snapshot.get("live_price_age_seconds"),
+        "live_bid": snapshot.get("live_bid"),
+        "live_ask": snapshot.get("live_ask"),
         "timeframe": snapshot["timeframe"],
         "price": snapshot["price"],
         "last_candle": snapshot["candle_at"],
