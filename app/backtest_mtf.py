@@ -67,6 +67,28 @@ def _fmt(label, trades, cost_r):
     )
 
 
+def _quality_band_report(trades, cost_r, minimum_sample=20):
+    """Report outcomes by technical score; suppress win-rate claims on tiny samples."""
+    bands = ((80, 84), (85, 89), (90, 94), (95, 100))
+    lines = ["نتائج حسب درجة الجودة الفنية (ليست احتمالات ربح):"]
+    for low, high in bands:
+        group = [t for t in trades if low <= t.get("quality_score", -1) <= high]
+        m = _metrics(group, cost_r)
+        if m["count"] < minimum_sample:
+            lines.append(
+                f"{low}-{high}: {m['count']} صفقة | عينة غير كافية "
+                f"(نحتاج {minimum_sample} على الأقل؛ لا نستنتج نسبة فوز)"
+            )
+        else:
+            win_rate = 100.0 * m["wins"] / m["count"]
+            pf = f"{m['pf']:.2f}" if m["pf"] is not None else "غير محسوب"
+            lines.append(
+                f"{low}-{high}: {m['count']} صفقة | الفوز {win_rate:.1f}% | "
+                f"الصافي {m['net']:+.2f}R | PF {pf}"
+            )
+    return lines
+
+
 def run_backtest_report(data=None):
     # Backtests prefer extended Yahoo GC=F futures history and fall back to XAUS spot;
     # they never fetch or reuse the live BiQuote quote.
@@ -103,6 +125,7 @@ def run_backtest_report(data=None):
         trade.update({
             "side": signal["side"], "signal_index": i,
             "setup": snapshot.get("setup"),
+            "quality_score": snapshot.get("quality_score", signal.get("confidence")),
         })
         trades.append(trade)
         i = trade["exit"] + 1
@@ -134,6 +157,8 @@ def run_backtest_report(data=None):
         "",
         *([_fmt("التطوير", train, cost_r), _fmt("الاختبار المستقل OOS", test, cost_r)] if split is not None else []),
         _fmt("كل العينة بعد الإحماء", trades, cost_r),
+        "",
+        *_quality_band_report(trades, cost_r),
         "",
         "البيانات التاريخية مرجعية وقد تختلف عن تسعير XTB؛ لا يحاكي الاختبار السبريد والانزلاق بدقة ما لم تُعاير تكلفة R.",
         "النتائج ليست ضماناً للأداء المستقبلي ولا تمثل التنفيذ الفعلي.",
