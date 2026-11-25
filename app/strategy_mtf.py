@@ -1,4 +1,5 @@
 """Multi-timeframe XAU/USD strategy with closed-candle/no-lookahead rules."""
+import math
 from bisect import bisect_right
 
 LIVE_CONFIG = {
@@ -218,16 +219,34 @@ def analyze_mtf(data, now):
             return snapshot, None
         entry = float(next_bar["open"])
 
-    risk = 1.5 * m15_atr
+    # Preserve the quote precision and round protective/target prices outward.
+    # Nearest rounding at 3 decimals could turn an intended 2.00R target into
+    # 1.99R, causing the API's strict 1:2 validator to reject a valid setup.
+    precision = 10_000
+    entry_out = round(float(entry), 4)
+    raw_risk = 1.5 * float(m15_atr)
     if side == "BUY":
-        stop, tp1, tp2 = entry - risk, entry + risk, entry + 2 * risk
+        stop = math.floor((entry_out - raw_risk) * precision) / precision
+        actual_risk = entry_out - stop
+        tp1 = round(entry_out + actual_risk, 4)
+        tp2 = math.ceil((entry_out + 2.0 * actual_risk) * precision) / precision
+        valid_levels = 0 < stop < entry_out < tp1 < tp2
     else:
-        stop, tp1, tp2 = entry + risk, entry - risk, entry - 2 * risk
+        stop = math.ceil((entry_out + raw_risk) * precision) / precision
+        actual_risk = stop - entry_out
+        tp1 = round(entry_out - actual_risk, 4)
+        tp2 = math.floor((entry_out - 2.0 * actual_risk) * precision) / precision
+        valid_levels = 0 < tp2 < tp1 < entry_out < stop
+
+    actual_reward = abs(tp2 - entry_out)
+    if not valid_levels or actual_risk <= 0 or actual_reward / actual_risk < 2.0:
+        snapshot["entry_reject_reason"] = "rounded risk/reward levels do not preserve minimum 1:2"
+        return snapshot, None
 
     return snapshot, {
-        "symbol": "XAUUSD", "side": side, "entry": round(entry, 3),
-        "stop_loss": round(stop, 3), "take_profit_1": round(tp1, 3),
-        "take_profit": round(tp2, 3), "timeframe": "M5/M15",
+        "symbol": "XAUUSD", "side": side, "entry": entry_out,
+        "stop_loss": round(stop, 4), "take_profit_1": round(tp1, 4),
+        "take_profit": round(tp2, 4), "timeframe": "M5/M15",
         "reason": (
             f"{setup} على M15؛ اتجاه H1={h1_bias} وH4={h4_bias}؛ "
             f"تأكيد دخول M5؛ جودة فنية {score}/100"
