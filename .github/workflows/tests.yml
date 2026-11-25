@@ -26,7 +26,7 @@ jobs:
           PYTHONPATH: .
         run: python -m pytest -q
 
-      - name: Verify XAUS candle feed and run safe smoke backtest
+      - name: Verify extended historical feed and run safe backtest
         if: github.event_name == 'pull_request'
         env:
           PYTHONPATH: .
