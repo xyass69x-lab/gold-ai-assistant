@@ -1,8 +1,7 @@
-"""XAUS-backed XAU/USD OHLC adapter with strict freshness and completeness checks.
+"""Separate XAUS historical OHLC candles from BiQuote live MT5 spot quotes.
 
-XAUS exposes free chart OHLC data without an API key. Its chart endpoint is a
-Yahoo Finance proxy, so these candles are reference data, not XTB execution quotes.
-The engine fails closed whenever bars are stale, malformed, or insufficient.
+Historical candles are used only for indicators and backtests. Fresh BiQuote
+bid/ask/mid quotes are a separate entry confirmation, not XTB execution prices.
 """
 import math
 import time
@@ -10,9 +9,9 @@ from datetime import datetime, timezone
 
 import requests
 
-API_URL = "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X"
-LIVE_SPOT_URL = "https://xaus.com/api/v1/spot"
-SYMBOL = "XAUUSD=X"
+API_URL = "https://xaus.com/api/v1/chart"
+LIVE_SPOT_URL = "https://biquote.io/api/XAUUSD"
+SYMBOL = "xau"
 HEADERS = {"User-Agent": "GoldAIAssistant/2.1", "Accept": "application/json"}
 BASE_INTERVAL = "5m"
 BASE_SECONDS = 5 * 60
@@ -30,8 +29,8 @@ MIN_BASE_CANDLES = 500
 MIN_M15_CANDLES = 220
 MIN_H1_CANDLES = 60
 MIN_H4_CANDLES = 50
-SOURCE_NAME = "Yahoo Finance direct OHLC (XAUUSD=X)"
-LIVE_PRICE_SOURCE = "XAUS live spot API"
+SOURCE_NAME = "XAUS chart OHLC (Yahoo Finance proxy)"
+LIVE_PRICE_SOURCE = "BiQuote XAUUSD MT5 quote"
 INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS}
 _CACHE = {}
 
@@ -146,7 +145,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     try:
         response = requests.get(
             API_URL,
-            params={"range": period_range, "interval": interval},
+            params={"symbol": SYMBOL, "range": period_range, "interval": interval},
             headers=HEADERS,
             timeout=20,
         )
@@ -159,7 +158,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     except MarketDataError:
         raise
     except (requests.RequestException, ValueError) as exc:
-        raise MarketDataError(f"تعذر جلب شموع Yahoo Finance ({interval}): {str(exc)[:180]}") from exc
+        raise MarketDataError(f"تعذر جلب شموع XAUS ({interval}): {str(exc)[:180]}") from exc
 
     if not isinstance(payload, dict):
         raise MarketDataError("استجابة XAUS ليست JSON صالحاً")
@@ -172,7 +171,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     unique = {bar["timestamp"]: bar for bar in bars}
     bars = list(unique.values())
     if not bars:
-        raise MarketDataError(f"لم تصل شموع OHLC صالحة من Yahoo Finance ({interval})")
+        raise MarketDataError(f"لم تصل شموع OHLC صالحة من XAUS ({interval})")
 
     fetched_at = time.time()
     # Refresh the 5m series once per minute and the 1h series at most every 5 minutes.
@@ -185,50 +184,63 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
 
 
 
-def fetch_live_price(now=None, max_age_seconds=90):
-    """Fetch an independently sourced, timestamp-validated XAUS spot quote."""
+def fetch_live_price(now=None, max_age_seconds=45):
+    """Fetch a separate live MT5 quote; reject closed, stale, or malformed quotes."""
     now = time.time() if now is None else float(now)
     try:
         response = requests.get(
             LIVE_SPOT_URL,
-            params={"compact": "1"},
+            params={"allowStale": "false"},
             headers=HEADERS,
             timeout=10,
         )
-        if response.status_code == 503:
-            raise MarketDataError("مصدر السعر اللحظي XAUS غير متاح (503)")
+        if response.status_code == 404:
+            raise MarketDataError("BiQuote لا يملك سعراً حياً حديثاً للذهب حالياً")
         if response.status_code == 429:
-            raise MarketDataError("تجاوز مصدر السعر اللحظي حد الطلبات؛ أوقفنا الإشارات مؤقتاً")
+            raise MarketDataError("تجاوز مصدر السعر BiQuote حد الطلبات؛ أوقفنا الإشارات مؤقتاً")
+        if response.status_code == 503:
+            raise MarketDataError("مصدر السعر BiQuote غير متاح حالياً (503)")
         response.raise_for_status()
         payload = response.json()
     except MarketDataError:
         raise
     except (requests.RequestException, ValueError) as exc:
-        raise MarketDataError(f"تعذر جلب السعر اللحظي من XAUS: {str(exc)[:160]}") from exc
+        raise MarketDataError(f"تعذر جلب السعر اللحظي من BiQuote: {str(exc)[:160]}") from exc
 
     if not isinstance(payload, dict):
-        raise MarketDataError("استجابة السعر اللحظي ليست JSON صالحاً")
-    state = payload.get("data_state") or {}
-    if state.get("status") != "fresh":
-        raise MarketDataError(f"السعر اللحظي غير حديث: {state.get('status', 'unknown')}")
+        raise MarketDataError("استجابة BiQuote ليست JSON صالحاً")
     try:
-        price = float(payload.get("spot_usd_oz", (payload.get("xau") or {}).get("price")))
-        age = float(state.get("age_seconds"))
-        as_of = payload.get("price_as_of") or state.get("as_of")
-        source_time = _parse_timestamp(as_of)
-    except (TypeError, ValueError, MarketDataError) as exc:
-        raise MarketDataError("بيانات السعر اللحظي أو توقيتها غير مكتملة") from exc
+        if payload.get("stale") or payload.get("marketState") != "open":
+            raise MarketDataError("سوق BiQuote مغلق أو أن آخر سعر معلّم كقديم")
+        age = float(payload.get("quoteAgeSeconds"))
+        timestamp = payload.get("lastQuoteAt") or payload.get("timestamp")
+        source_time = _parse_timestamp(timestamp)
+        bid = float(payload.get("bid"))
+        ask = float(payload.get("ask"))
+        mid = float(payload.get("mid"))
+    except MarketDataError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise MarketDataError("بيانات Bid/Ask أو توقيتها من BiQuote غير مكتملة") from exc
+
     measured_age = max(age, now - source_time)
-    if not math.isfinite(price) or price <= 0:
-        raise MarketDataError("السعر اللحظي غير صالح")
+    if not all(math.isfinite(value) and value > 0 for value in (bid, ask, mid)):
+        raise MarketDataError("أسعار Bid/Ask/Mid من BiQuote غير صالحة")
+    if ask < bid or not bid <= mid <= ask:
+        raise MarketDataError("ترتيب أسعار Bid/Ask/Mid من BiQuote غير منطقي")
     if measured_age < -5 or measured_age > max_age_seconds:
-        raise MarketDataError(f"السعر اللحظي قديم منذ {int(max(0, measured_age))} ثانية")
+        raise MarketDataError(f"سعر BiQuote قديم منذ {int(max(0, measured_age))} ثانية")
     return {
-        "price": price,
+        "price": mid,
+        "bid": bid,
+        "ask": ask,
+        "spread": ask - bid,
         "age_seconds": int(max(0, measured_age)),
         "as_of": datetime.fromtimestamp(source_time, timezone.utc).isoformat(),
-        "source": LIVE_PRICE_SOURCE,
+        "source": payload.get("source") or LIVE_PRICE_SOURCE,
+        "provider": LIVE_PRICE_SOURCE,
     }
+
 
 def _closed_only(candles, seconds, now):
     return [
