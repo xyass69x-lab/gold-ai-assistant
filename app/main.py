@@ -723,9 +723,19 @@ def deliver_pending_market_reports(limit: int = 5):
 
 def run_engine_once():
     global ENGINE_STATE
+    previous_candle = ENGINE_STATE.get("last_candle")
     market_data = fetch_market_data()
     candles = market_data["m5"]
     snapshot, raw_signal = analyze_mtf(market_data, time.time())
+    if snapshot["candle_at"] != previous_candle:
+        print(
+            "MARKET_ENGINE_OK "
+            f"source={snapshot['source']} price={snapshot['price']:.3f} "
+            f"M5={len(market_data['m5'])} M15={len(market_data['m15'])} "
+            f"H1={len(market_data['h1'])} H4={len(market_data['h4'])} "
+            f"candle_age_seconds={snapshot['candle_age_seconds']}",
+            flush=True,
+        )
     ENGINE_STATE = {
         "status": "online",
         "message": "محرك التحليل يعمل — بانتظار تحقق شروط الإشارة" if not raw_signal else f"تم رصد إشارة {raw_signal['side']}",
