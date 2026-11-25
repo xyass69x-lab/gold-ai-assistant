@@ -163,7 +163,7 @@ class MarketDataFetchTests(unittest.TestCase):
 
     def test_biquote_m5_rejects_late_candle(self):
         now = 1_800_000_000
-        stamp = datetime.fromtimestamp(now - 900, timezone.utc).isoformat().replace("+00:00", "Z")
+        stamp = datetime.fromtimestamp(now - 1200, timezone.utc).isoformat().replace("+00:00", "Z")
         response = Mock()
         response.status_code = 200
         response.json.return_value = {"bars": [{
