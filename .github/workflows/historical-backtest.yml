@@ -30,6 +30,7 @@ jobs:
         env:
           BACKTEST_ROUND_TURN_COST_R: "0"
         run: |
+          set -o pipefail
           mkdir -p reports
           python scripts/run_historical_backtest.py | tee reports/historical-backtest.txt
       - name: Upload backtest report
