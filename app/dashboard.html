@@ -73,7 +73,7 @@ async function refresh() {
     byId('engineState').textContent = online ? 'متصل' : engine.status === 'error' ? 'تعذر الاتصال' : 'جارٍ التهيئة';
     byId('engineState').className = 'value ' + (online ? 'status-ok' : 'status-error');
     byId('enginePrice').textContent = fmt(engine.price);
-    byId('engineSource').textContent = engine.source || 'غير محدد';
+    byId('engineSource').textContent = 'الشموع: ' + (engine.source || 'غير محدد') + ' | السعر اللحظي: ' + (engine.live_price_source || 'غير متاح');
     byId('engineDetail').textContent = engine.message || 'بانتظار حالة المحرك';
     byId('engineCandle').textContent = 'وقت آخر شمعة مغلقة: ' + (engine.last_candle || '—');
     byId('engineError').textContent = engine.last_error ? 'تفاصيل الخطأ: ' + engine.last_error : '';
