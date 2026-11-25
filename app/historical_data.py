@@ -203,6 +203,7 @@ def fetch_historical_market_data(now=None):
             "server_time_note": "Provider broker-server time; no UTC offset was guessed",
             "history_window_start": window_start.isoformat(),
             "history_window_end": window_end.isoformat(),
+            "history_lag_days": max(0, (current_date - window_end).days),
         }
     except MarketDataError as exc:
         # If the historical provider is unavailable, preserve a transparent
