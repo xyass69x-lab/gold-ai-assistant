@@ -15,6 +15,8 @@ SYMBOL = "xau"
 HEADERS = {"User-Agent": "GoldAIAssistant/2.1", "Accept": "application/json"}
 BASE_INTERVAL = "5m"
 BASE_SECONDS = 5 * 60
+M15_INTERVAL = "15m"
+M15_SECONDS = 15 * 60
 HTF_INTERVAL = "1h"
 HTF_SECONDS = 60 * 60
 BASE_RANGE = "3mo"
@@ -22,6 +24,8 @@ HTF_RANGE = "3mo"
 BASE_CACHE_SECONDS = 5 * 60
 HTF_CACHE_SECONDS = 60 * 60
 MAX_BASE_AGE_SECONDS = 15 * 60
+MAX_LIVE_M5_AGE_SECONDS = 180
+MIN_LIVE_M5_CANDLES = 100
 MAX_M15_AGE_SECONDS = 30 * 60
 MAX_H1_AGE_SECONDS = 2 * 60 * 60
 MAX_H4_AGE_SECONDS = 8 * 60 * 60
@@ -31,7 +35,7 @@ MIN_H1_CANDLES = 60
 MIN_H4_CANDLES = 50
 SOURCE_NAME = "XAUS chart OHLC (Yahoo Finance proxy)"
 LIVE_PRICE_SOURCE = "BiQuote XAUUSD MT5 quote"
-INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS}
+INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "15m": M15_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS}
 _CACHE = {}
 
 
@@ -276,49 +280,116 @@ def resample_candles(candles, source_seconds, target_seconds):
     return output
 
 
-def fetch_market_data(force_refresh=False, now=None, include_live_quote=True):
-    """Return XAUS historical candles and an optional fresh BiQuote MT5 quote."""
-    now = time.time() if now is None else float(now)
-    m5_raw = _fetch_chart(BASE_INTERVAL, BASE_RANGE, BASE_CACHE_SECONDS, force_refresh)
-    h1_raw = _fetch_chart(HTF_INTERVAL, HTF_RANGE, HTF_CACHE_SECONDS, force_refresh)
 
-    m5_closed = _closed_only(m5_raw, BASE_SECONDS, now)
+def _fetch_biquote_m5(now, min_bars=MIN_LIVE_M5_CANDLES):
+    """Fetch closed, real-time-aggregated M5 bars from the independent MT5 OHLC feed."""
+    try:
+        response = requests.get(
+            f"{LIVE_SPOT_URL}/ohlc",
+            params={"interval": "5m", "limit": 288},
+            headers=HEADERS,
+            timeout=10,
+        )
+        if response.status_code == 429:
+            raise MarketDataError("BiQuote OHLC تجاوز حد الطلبات")
+        if response.status_code == 503:
+            raise MarketDataError("BiQuote OHLC غير متاح حالياً")
+        response.raise_for_status()
+        payload = response.json()
+    except MarketDataError:
+        raise
+    except (requests.RequestException, ValueError) as exc:
+        raise MarketDataError(f"تعذر جلب شموع M5 الحديثة من BiQuote: {str(exc)[:160]}") from exc
+
+    rows = payload.get("bars") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise MarketDataError("استجابة BiQuote OHLC لا تحتوي على bars array")
+    bars = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("isOpen") is True:
+            continue
+        bar = _validate_bar({
+            "timestamp": row.get("openTime"),
+            "open": row.get("open"),
+            "high": row.get("high"),
+            "low": row.get("low"),
+            "close": row.get("close"),
+            "volume": row.get("tickVolume", row.get("volume")),
+        })
+        if bar is not None:
+            bars.append(bar)
+    bars.sort(key=lambda bar: bar["timestamp"])
+    unique = {bar["timestamp"]: bar for bar in bars}
+    bars = list(unique.values())
+    bars = _closed_only(bars, BASE_SECONDS, now)
+    if len(bars) < min_bars:
+        raise MarketDataError(
+            f"شموع BiQuote M5 غير كافية: {len(bars)} شمعة مغلقة؛ نحتاج {min_bars}"
+        )
+    age = now - (bars[-1]["timestamp"] + BASE_SECONDS)
+    if age < 0 or age > MAX_LIVE_M5_AGE_SECONDS:
+        raise MarketDataError(
+            f"شموع BiQuote M5 متأخرة منذ {int(max(0, age))} ثانية؛ أوقفنا الإشارات"
+        )
+    return bars, int(max(0, age))
+
+
+def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, use_biquote_m5=None):
+    """Use fresh BiQuote M5 candles for live entries and XAUS for higher timeframes."""
+    now = time.time() if now is None else float(now)
+    if use_biquote_m5 is None:
+        use_biquote_m5 = bool(include_live_quote)
+
+    h1_raw = _fetch_chart(HTF_INTERVAL, HTF_RANGE, HTF_CACHE_SECONDS, force_refresh)
     h1_closed = _closed_only(h1_raw, HTF_SECONDS, now)
-    if not m5_closed:
-        raise MarketDataError("لا توجد شموع M5 مغلقة من XAUS")
     if not h1_closed:
         raise MarketDataError("لا توجد شموع H1 مغلقة من XAUS")
 
-    m5_age = now - (m5_closed[-1]["timestamp"] + BASE_SECONDS)
-    h1_age = now - (h1_closed[-1]["timestamp"] + HTF_SECONDS)
-    if m5_age < 0 or m5_age > MAX_BASE_AGE_SECONDS:
+    if use_biquote_m5:
+        m5_raw, m5_age = _fetch_biquote_m5(now)
+        m15_raw = _fetch_chart(M15_INTERVAL, HTF_RANGE, 15 * 60, force_refresh)
+        source = "BiQuote MT5 M5 OHLC + XAUS M15/H1/H4 OHLC"
+        min_m5 = MIN_LIVE_M5_CANDLES
+    else:
+        m5_raw = _fetch_chart(BASE_INTERVAL, BASE_RANGE, BASE_CACHE_SECONDS, force_refresh)
+        m5_closed = _closed_only(m5_raw, BASE_SECONDS, now)
+        if not m5_closed:
+            raise MarketDataError("لا توجد شموع M5 مغلقة من XAUS")
+        m5_age = now - (m5_closed[-1]["timestamp"] + BASE_SECONDS)
+        if m5_age < 0 or m5_age > MAX_BASE_AGE_SECONDS:
+            raise MarketDataError(
+                f"بيانات M5 من XAUS قديمة منذ {int(max(0, m5_age) / 60)} دقيقة؛ أوقفنا الإشارات."
+            )
+        m15_raw = resample_candles(m5_raw, BASE_SECONDS, M15_SECONDS)
+        source = SOURCE_NAME
+        min_m5 = MIN_BASE_CANDLES
+
+    m5_closed = _closed_only(m5_raw, BASE_SECONDS, now)
+    if len(m5_closed) < min_m5:
         raise MarketDataError(
-            f"بيانات M5 من XAUS قديمة منذ {int(max(0, m5_age) / 60)} دقيقة؛ أوقفنا الإشارات."
+            f"بيانات M5 غير كافية: {len(m5_closed)} شمعة، نحتاج {min_m5}."
         )
+
+    h1_age = now - (h1_closed[-1]["timestamp"] + HTF_SECONDS)
     if h1_age < 0 or h1_age > MAX_H1_AGE_SECONDS:
         raise MarketDataError("آخر شمعة H1 من XAUS قديمة؛ أوقفنا الإشارات.")
-    if len(m5_closed) < MIN_BASE_CANDLES:
-        raise MarketDataError(
-            f"بيانات M5 غير كافية: {len(m5_closed)} شمعة، نحتاج {MIN_BASE_CANDLES}."
-        )
     if len(h1_closed) < MIN_H1_CANDLES:
         raise MarketDataError(
             f"بيانات H1 غير كافية: {len(h1_closed)} شمعة، نحتاج {MIN_H1_CANDLES}."
         )
 
-    m15_raw = resample_candles(m5_raw, BASE_SECONDS, 15 * 60)
     h4_raw = resample_candles(h1_raw, HTF_SECONDS, 4 * HTF_SECONDS)
-    m15_closed = _closed_only(m15_raw, 15 * 60, now)
+    m15_closed = _closed_only(m15_raw, M15_SECONDS, now)
     h4_closed = _closed_only(h4_raw, 4 * HTF_SECONDS, now)
     if not m15_closed:
-        raise MarketDataError("تعذر تكوين شموع M15 كاملة من بيانات XAUS")
+        raise MarketDataError("لا توجد شموع M15 مغلقة من مصدر الشموع")
     if not h4_closed:
         raise MarketDataError("تعذر تكوين شموع H4 كاملة من بيانات XAUS")
 
-    m15_age = now - (m15_closed[-1]["timestamp"] + 15 * 60)
+    m15_age = now - (m15_closed[-1]["timestamp"] + M15_SECONDS)
     h4_age = now - (h4_closed[-1]["timestamp"] + 4 * HTF_SECONDS)
     if m15_age < 0 or m15_age > MAX_M15_AGE_SECONDS:
-        raise MarketDataError("آخر شمعة M15 مشتقة قديمة؛ أوقفنا الإشارات.")
+        raise MarketDataError("آخر شمعة M15 قديمة؛ أوقفنا الإشارات.")
     if h4_age < 0 or h4_age > MAX_H4_AGE_SECONDS:
         raise MarketDataError("آخر شمعة H4 مشتقة قديمة؛ أوقفنا الإشارات.")
     if len(m15_closed) < MIN_M15_CANDLES:
@@ -332,7 +403,7 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True):
 
     return {
         "symbol": "XAUUSD",
-        "source": SOURCE_NAME,
+        "source": source,
         "live_price_source": LIVE_PRICE_SOURCE,
         "live_quote": fetch_live_price(now=now) if include_live_quote else None,
         "m5": m5_raw,
@@ -345,3 +416,4 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True):
         "h1_age_seconds": int(max(0, h1_age)),
         "h4_age_seconds": int(max(0, h4_age)),
     }
+
