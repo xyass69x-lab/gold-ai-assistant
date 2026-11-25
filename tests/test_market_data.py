@@ -194,7 +194,7 @@ class MarketDataFetchTests(unittest.TestCase):
             data = market_data.fetch_market_data(now=now, include_live_quote=True)
 
         live_m5.assert_called_once()
-        self.assertIn("BiQuote M5", data["source"])
+        self.assertIn("BiQuote MT5 M5", data["source"])
         self.assertIn("XAUS M15/H1/H4", data["source"])
         self.assertEqual(len(data["m15"]), 220)
         self.assertEqual(data["live_quote"]["price"], 4001.0)
