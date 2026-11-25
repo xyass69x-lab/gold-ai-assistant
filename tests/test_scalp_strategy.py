@@ -53,3 +53,43 @@ def test_scalp_signal_passes_application_schema_and_rr_validation():
     }
     parsed = Signal(**signal)
     assert validate_signal(parsed) == 2.0
+
+
+def _confirmed_scalp_data():
+    bars = []
+    price = 100.0
+    for i in range(80):
+        op = price
+        price += 0.12
+        bars.append(_bar(i * 300, op, price + 0.05, op - 0.05, price))
+    last = bars[-1]
+    last.update({
+        "open": last["close"] - 0.25,
+        "low": last["close"] - 0.30,
+        "close": last["close"] + 0.25,
+        "high": last["close"] + 0.30,
+    })
+    next_ts = last["timestamp"] + 300
+    return bars, next_ts, last
+
+
+def test_scalp_uses_fresh_spot_quote_after_90_second_window():
+    bars, next_ts, last = _confirmed_scalp_data()
+    data = {
+        "m5": bars, "h1": [], "h4": [],
+        "live_quote": {"price": last["close"] + 0.02, "age_seconds": 15},
+    }
+    snapshot = {"higher_timeframe_bias": {"h1": "BULLISH", "h4": "BULLISH"}}
+    signal = analyze_scalp(data, next_ts + 240, snapshot)
+    assert signal is not None
+    assert signal["entry"] == round(last["close"] + 0.02, 3)
+
+
+def test_scalp_rejects_stale_live_spot_quote():
+    bars, next_ts, last = _confirmed_scalp_data()
+    data = {
+        "m5": bars, "h1": [], "h4": [],
+        "live_quote": {"price": last["close"] + 0.02, "age_seconds": 120},
+    }
+    snapshot = {"higher_timeframe_bias": {"h1": "BULLISH", "h4": "BULLISH"}}
+    assert analyze_scalp(data, next_ts + 240, snapshot) is None
