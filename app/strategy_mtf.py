@@ -184,14 +184,30 @@ def analyze_mtf(data, now):
     if score < LIVE_CONFIG["min_score"]:
         return snapshot, None
 
-    # The next M5 candle must already have opened. Never invent an entry price.
-    next_ts = int(last_m5["timestamp"]) + 300
-    next_bar = next((bar for bar in m5 if int(bar["timestamp"]) == next_ts), None)
-    if next_bar is None or not (next_ts <= now < next_ts + 300) or now - next_ts > 90:
-        snapshot["entry_pending"] = next_bar is None and now < next_ts + 300
-        return snapshot, None
+    # Live mode uses an independent, timestamp-validated spot quote. Historical
+    # tests/backtests intentionally omit live_quote and use the next candle open.
+    live_quote = data.get("live_quote")
+    if live_quote is not None:
+        quote_age = float(live_quote.get("age_seconds", float("inf")))
+        candle_age = max(0.0, now - (int(last_m5["timestamp"]) + 300))
+        entry = float(live_quote.get("price", 0.0))
+        max_extension = max(0.5 * float(m5_atr), 1.0)
+        if (quote_age > 90 or candle_age > 600 or entry <= 0
+                or abs(entry - float(last_m5["close"])) > max_extension):
+            snapshot["entry_pending"] = True
+            snapshot["entry_reject_reason"] = "live quote stale or price extended from setup candle"
+            return snapshot, None
+        snapshot["live_price"] = entry
+        snapshot["live_price_age_seconds"] = int(quote_age)
+        snapshot["entry_source"] = live_quote.get("source", "independent spot quote")
+    else:
+        next_ts = int(last_m5["timestamp"]) + 300
+        next_bar = next((bar for bar in m5 if int(bar["timestamp"]) == next_ts), None)
+        if next_bar is None or not (next_ts <= now < next_ts + 300) or now - next_ts > 90:
+            snapshot["entry_pending"] = next_bar is None and now < next_ts + 300
+            return snapshot, None
+        entry = float(next_bar["open"])
 
-    entry = float(next_bar["open"])
     risk = 1.5 * m15_atr
     if side == "BUY":
         stop, tp1, tp2 = entry - risk, entry + risk, entry + 2 * risk
