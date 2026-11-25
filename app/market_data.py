@@ -348,7 +348,7 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
     if use_biquote_m5:
         m5_raw, m5_age = _fetch_biquote_m5(now)
         m15_raw = _fetch_chart(M15_INTERVAL, HTF_RANGE, 15 * 60, force_refresh)
-        source = "BiQuote MT5 M5 OHLC + XAUS M15/H1/H4 OHLC"
+        source = "BiQuote M5 OHLC + XAUS M15/H1/H4 OHLC"
         min_m5 = MIN_LIVE_M5_CANDLES
     else:
         m5_raw = _fetch_chart(BASE_INTERVAL, BASE_RANGE, BASE_CACHE_SECONDS, force_refresh)
