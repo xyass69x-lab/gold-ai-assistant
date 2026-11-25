@@ -107,7 +107,7 @@ class MarketDataFetchTests(unittest.TestCase):
 
         with patch.object(market_data, "_fetch_chart", side_effect=fake_fetch):
             with self.assertRaises(market_data.MarketDataError):
-                market_data.fetch_market_data(now=now)
+                market_data.fetch_market_data(now=now, include_live_quote=False)
 
 
     def test_fresh_independent_spot_quote_is_parsed(self):
