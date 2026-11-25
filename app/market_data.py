@@ -163,7 +163,7 @@ def _fetch_chart(interval, period_range, cache_seconds, force=False):
     if not isinstance(payload, dict):
         raise MarketDataError("استجابة XAUS ليست JSON صالحاً")
     if payload.get("error"):
-        raise MarketDataError(f"Yahoo Finance: {str(payload['error'])[:180]}")
+        raise MarketDataError(f"XAUS: {str(payload['error'])[:180]}")
 
     bars = [_validate_bar(point) for point in _point_list(payload)]
     bars = [bar for bar in bars if bar is not None]
