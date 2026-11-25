@@ -2,7 +2,7 @@
 import os
 from datetime import datetime, timezone
 
-from app.market_data import fetch_market_data
+from app.historical_data import fetch_historical_market_data
 from app.strategy_mtf import analyze_mtf
 
 HORIZON_BARS = 288  # 24 hours on M5
@@ -71,7 +71,7 @@ def run_backtest_report(data=None):
     # Optional historical dataset is supplied by the isolated research workflow;
     # live service calls continue to use the normal market-data adapter.
     if data is None:
-        data = fetch_market_data(include_live_quote=False)
+        data = fetch_historical_market_data()
     # Never allow the current live quote to leak into historical simulation.
     data = dict(data)
     data.pop("live_quote", None)
