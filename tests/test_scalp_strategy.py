@@ -77,19 +77,19 @@ def test_scalp_uses_fresh_spot_quote_after_90_second_window():
     bars, next_ts, last = _confirmed_scalp_data()
     data = {
         "m5": bars, "h1": [], "h4": [],
-        "live_quote": {"price": last["close"] + 0.02, "age_seconds": 15},
+        "live_quote": {"price": last["close"] + 0.02, "bid": last["close"] + 0.01, "ask": last["close"] + 0.03, "age_seconds": 15},
     }
     snapshot = {"higher_timeframe_bias": {"h1": "BULLISH", "h4": "BULLISH"}}
     signal = analyze_scalp(data, next_ts + 240, snapshot)
     assert signal is not None
-    assert signal["entry"] == round(last["close"] + 0.02, 3)
+    assert signal["entry"] == round(last["close"] + 0.03, 3)
 
 
 def test_scalp_rejects_stale_live_spot_quote():
     bars, next_ts, last = _confirmed_scalp_data()
     data = {
         "m5": bars, "h1": [], "h4": [],
-        "live_quote": {"price": last["close"] + 0.02, "age_seconds": 120},
+        "live_quote": {"price": last["close"] + 0.02, "bid": last["close"] + 0.01, "ask": last["close"] + 0.03, "age_seconds": 120},
     }
     snapshot = {"higher_timeframe_bias": {"h1": "BULLISH", "h4": "BULLISH"}}
     assert analyze_scalp(data, next_ts + 240, snapshot) is None
