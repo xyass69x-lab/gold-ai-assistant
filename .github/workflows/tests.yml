@@ -24,4 +24,4 @@ jobs:
         env:
           SAFE_TEST_MODE: "true"
           DATABASE_PATH: /tmp/gold-ai-assistant-tests/signals.db
-        run: pytest -q
+        run: python -m pytest -q
