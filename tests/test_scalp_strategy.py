@@ -60,8 +60,8 @@ def _confirmed_scalp_data():
     price = 100.0
     for i in range(80):
         op = price
-        price += 0.12
-        bars.append(_bar(i * 300, op, price + 0.05, op - 0.05, price))
+        price += [0.13, -0.08, 0.13, -0.08, -0.08][i % 5]
+        bars.append(_bar(i * 300, op, max(op, price) + 0.05, min(op, price) - 0.05, price))
     last = bars[-1]
     last.update({
         "open": last["close"] - 0.25,
