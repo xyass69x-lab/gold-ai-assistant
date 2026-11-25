@@ -1,7 +1,7 @@
-"""Separate XAUS historical OHLC candles from BiQuote live MT5 spot quotes.
+"""Combine fresh BiQuote M5/MT5 entry data with XAUS higher-timeframe context.
 
-Historical candles are used only for indicators and backtests. Fresh BiQuote
-bid/ask/mid quotes are a separate entry confirmation, not XTB execution prices.
+XAUS supplies M15/H1/H4 context and historical M5 for backtests. BiQuote supplies
+closed live M5 candles plus a fresh bid/ask quote. Neither feed is XTB execution.
 """
 import math
 import time
