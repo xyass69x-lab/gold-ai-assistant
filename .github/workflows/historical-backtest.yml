@@ -1,4 +1,5 @@
 name: Historical XAUUSD backtest
+# Research-only run uses chunked public M5 history and an extended H1 window.
 
 on:
   push:
