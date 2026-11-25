@@ -423,7 +423,8 @@ def _signal_message(signal: Signal, rr: float, source: str):
         f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\n"
         f"TP2: {signal.take_profit}\n"
         f"العائد/المخاطرة إلى TP2: 1:{rr:.2f}\n"
-        "إدارة الصفقة: إغلاق 50% عند TP1؛ ثم نقل وقف الكمية المتبقية إلى الدخول؛ TP2 للكمية المتبقية.\n"
+        + (f"الجودة الفنية: {signal.confidence}/100 (ليست نسبة احتمال الربح)\\n" if signal.confidence is not None else "")
+        + "إدارة الصفقة: إغلاق 50% عند TP1؛ ثم نقل وقف الكمية المتبقية إلى الدخول؛ TP2 للكمية المتبقية.\\n"
         "صلاحية المتابعة: 24 ساعة من إشارة الدخول.\n"
         f"السبب: {signal.reason}\n"
         f"المصدر: {source}\n"
