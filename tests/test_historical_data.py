@@ -67,6 +67,7 @@ class AlgoSpecialHistoricalDataTests(unittest.TestCase):
         self.assertEqual(len(m5_calls), 2)
         self.assertEqual(data["history_window_end"], "2026-10-30")
         self.assertEqual(data["history_window_start"], "2026-09-30")
+        self.assertEqual(data["history_lag_days"], 26)
         self.assertGreaterEqual(len(data["m5"]), 3000)
         self.assertGreaterEqual(len(data["m15"]), 220)
         self.assertGreaterEqual(len(data["h1"]), 60)
