@@ -92,7 +92,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
             "price": 121.05, "bid": 121.04, "ask": 121.06,
             "age_seconds": quote_age, "source": "test spot feed",
         }
-        self.data["m5_age_seconds"] = 240
+        self.data["m5_age_seconds"] = 120
 
     def _patch_indicators(self):
         def fake_ema(values, period):
@@ -112,7 +112,7 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self._make_live_setup()
         patches = self._patch_indicators()
         with patches[0], patches[1], patches[2], patches[3]:
-            snapshot, signal = analyze_mtf(self.data, self.now + 240)
+            snapshot, signal = analyze_mtf(self.data, self.now + 120)
         self.assertIsNotNone(signal)
         self.assertEqual(signal["entry"], 121.06)
         self.assertEqual(snapshot["entry_source"], "test spot feed")
