@@ -116,6 +116,11 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self.assertIsNotNone(signal, snapshot)
         self.assertEqual(signal["entry"], 121.06)
         self.assertEqual(snapshot["entry_source"], "test spot feed")
+        self.assertEqual(signal["confidence"], snapshot["quality_score"])
+        self.assertEqual(snapshot["quality_score_type"], "technical_quality_not_win_probability")
+        self.assertEqual(sum(snapshot["quality_score_parts"].values()), snapshot["quality_score"])
+        self.assertGreaterEqual(signal["confidence"], 80)
+        self.assertLessEqual(signal["confidence"], 100)
 
     def test_stale_live_quote_blocks_mtf_signal(self):
         self._make_live_setup(quote_age=120)
