@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.market_data import fetch_market_data
 from app.strategy_mtf import analyze_mtf
+from app.scalp_strategy import analyze_scalp
 from app.trade_tracker import evaluate_trade_candle
 
 load_dotenv()
@@ -724,6 +725,12 @@ def run_engine_once():
     market_data = fetch_market_data()
     candles = market_data["m5"]
     snapshot, raw_signal = analyze_mtf(market_data, time.time())
+    if raw_signal is None:
+        scalp_signal = analyze_scalp(market_data, time.time(), snapshot)
+        if scalp_signal is not None:
+            raw_signal = scalp_signal
+            snapshot["setup"] = "SCALP_5M"
+            snapshot["scalp_quality"] = scalp_signal.get("quality_score")
     if snapshot["candle_at"] != previous_candle:
         print(
             "MARKET_ENGINE_OK "
@@ -742,7 +749,7 @@ def run_engine_once():
         "last_candle": snapshot["candle_at"],
         "last_checked": snapshot["checked_at"],
         "last_error": None,
-        "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup")},
+        "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup", "scalp_quality")},
     }
 
     if snapshot["candle_age_seconds"] <= 15 * 60 and int(datetime.fromisoformat(snapshot["candle_at"]).timestamp()) % (30 * 60) == 0:
