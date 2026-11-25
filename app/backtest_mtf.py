@@ -67,10 +67,45 @@ def _fmt(label, trades, cost_r):
     )
 
 
+def _rank_values(values):
+    order = sorted(range(len(values)), key=lambda index: values[index])
+    ranks = [0.0] * len(values)
+    cursor = 0
+    while cursor < len(order):
+        end = cursor + 1
+        while end < len(order) and values[order[end]] == values[order[cursor]]:
+            end += 1
+        average_rank = ((cursor + 1) + end) / 2.0
+        for position in range(cursor, end):
+            ranks[order[position]] = average_rank
+        cursor = end
+    return ranks
+
+
+def _spearman_score_outcome(trades):
+    """Spearman rank correlation between technical score and realized R."""
+    rows = [
+        (float(t["quality_score"]), float(t["r"]))
+        for t in trades if t.get("quality_score") is not None
+    ]
+    if len(rows) < 10:
+        return None
+    score_ranks = _rank_values([row[0] for row in rows])
+    outcome_ranks = _rank_values([row[1] for row in rows])
+    mean_x = sum(score_ranks) / len(rows)
+    mean_y = sum(outcome_ranks) / len(rows)
+    covariance = sum((x - mean_x) * (y - mean_y) for x, y in zip(score_ranks, outcome_ranks))
+    variance_x = sum((x - mean_x) ** 2 for x in score_ranks)
+    variance_y = sum((y - mean_y) ** 2 for y in outcome_ranks)
+    if variance_x <= 0 or variance_y <= 0:
+        return None
+    return covariance / (variance_x * variance_y) ** 0.5
+
+
 def _quality_band_report(trades, cost_r, minimum_sample=20):
-    """Report outcomes by technical score; suppress win-rate claims on tiny samples."""
-    bands = ((80, 84), (85, 89), (90, 94), (95, 100))
-    lines = ["نتائج حسب درجة الجودة الفنية (ليست احتمالات ربح):"]
+    """Report score bands and score/outcome rank association without overclaiming."""
+    bands = ((0, 49), (50, 59), (60, 69), (70, 79), (80, 89), (90, 100))
+    lines = ["نتائج الإصدار v2 حسب الجودة الفنية (الدرجة ليست احتمال ربح):"]
     for low, high in bands:
         group = [t for t in trades if low <= t.get("quality_score", -1) <= high]
         m = _metrics(group, cost_r)
@@ -86,8 +121,15 @@ def _quality_band_report(trades, cost_r, minimum_sample=20):
                 f"{low}-{high}: {m['count']} صفقة | الفوز {win_rate:.1f}% | "
                 f"الصافي {m['net']:+.2f}R | PF {pf}"
             )
+    correlation = _spearman_score_outcome(trades)
+    if correlation is None:
+        lines.append("ارتباط الدرجة بنتيجة R: عينة/تنوع درجات غير كافٍ (نحتاج 10 صفقات على الأقل ودرجات ونتائج متغيرة)")
+    else:
+        lines.append(
+            f"ارتباط Spearman بين الدرجة ونتيجة R: {correlation:+.3f} "
+            f"(وصفي فقط، n={sum(t.get('quality_score') is not None for t in trades)})"
+        )
     return lines
-
 
 def run_backtest_report(data=None):
     # Backtests prefer extended Yahoo GC=F futures history and fall back to XAUS spot;
