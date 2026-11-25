@@ -30,7 +30,9 @@ class BacktestTimingTests(unittest.TestCase):
              patch.object(backtest_mtf, "analyze_mtf", return_value=({"setup": None}, None)) as analyze:
             backtest_mtf.run_backtest_report()
 
+        first_data = analyze.call_args_list[0].args[0]
         first_now = analyze.call_args_list[0].args[1]
+        self.assertNotIn("live_quote", first_data)
         self.assertEqual(first_now, data["m5"][701]["timestamp"] + 30)
 
     def test_stop_wins_when_stop_and_target_touch_same_candle(self):
