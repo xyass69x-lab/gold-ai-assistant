@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app import market_data
 
@@ -113,7 +113,7 @@ class MarketDataFetchTests(unittest.TestCase):
     def test_fresh_independent_spot_quote_is_parsed(self):
         now = 1_800_000_000
         as_of = datetime.fromtimestamp(now - 12, timezone.utc).isoformat()
-        response = unittest.mock.Mock()
+        response = Mock()
         response.status_code = 200
         response.json.return_value = {
             "spot_usd_oz": 4012.5,
