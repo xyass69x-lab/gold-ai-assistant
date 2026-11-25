@@ -298,10 +298,7 @@ async def telegram_webhook(request: Request):
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
             error_detail = str(ENGINE_STATE.get("last_error") or "").strip()
-            # Never expose provider URLs or API credentials in Telegram diagnostics.
-            api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
-            if api_key:
-                error_detail = error_detail.replace(api_key, "[مخفي]")
+            # Never expose API credentials in Telegram diagnostics.
             error_detail = error_detail.replace("apikey=", "apikey=[مخفي]&")
             with closing(_db()) as conn:
                 active_count = conn.execute("SELECT COUNT(*) FROM signals WHERE status IN ('OPEN','TP1_HIT')").fetchone()[0]
