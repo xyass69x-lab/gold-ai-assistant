@@ -139,6 +139,11 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self.assertLess(signal["entry"], signal["take_profit_1"])
         self.assertLess(signal["take_profit_1"], signal["take_profit"])
 
+        # Exercise the same strict API validator used by the live engine.
+        from app.main import Signal, validate_signal
+        validated_rr = validate_signal(Signal(**signal))
+        self.assertGreaterEqual(validated_rr, 2.0)
+
 
     def test_mtf_rejects_live_price_diverged_from_higher_timeframe_candle(self):
         self._make_live_setup()
