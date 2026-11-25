@@ -150,9 +150,9 @@ def fetch_historical_market_data(now=None):
         float(now), timezone.utc
     )
     end_date = now.date()
-    # Nine inclusive calendar days normally provide >1,200 M5 bars while
-    # remaining below the public preview row ceiling.
-    m5_start = (end_date - timedelta(days=8)).isoformat()
+    # Eight inclusive calendar days normally provide >1,200 M5 bars while
+    # staying below the public preview row ceiling.
+    m5_start = (end_date - timedelta(days=7)).isoformat()
     # Fifteen days provide enough higher-timeframe context for EMA50 and H4 bias.
     htf_start = (end_date - timedelta(days=14)).isoformat()
     end = end_date.isoformat()
