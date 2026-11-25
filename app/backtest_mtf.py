@@ -2,7 +2,7 @@
 import os
 from datetime import datetime, timezone
 
-from app.historical_data import fetch_historical_market_data
+from app.market_data import fetch_market_data
 from app.strategy_mtf import analyze_mtf
 
 HORIZON_BARS = 288  # 24 hours on M5
@@ -68,20 +68,20 @@ def _fmt(label, trades, cost_r):
 
 
 def run_backtest_report(data=None):
-    # Optional historical dataset is supplied by the isolated research workflow;
-    # live service calls continue to use the normal market-data adapter.
+    # Backtests use the same XAUS candle feed as live analysis, but never fetch
+    # or reuse the independent BiQuote live quote.
     if data is None:
-        data = fetch_historical_market_data()
+        data = fetch_market_data(include_live_quote=False)
     # Never allow the current live quote to leak into historical simulation.
     data = dict(data)
     data.pop("live_quote", None)
     candles = data["m5"]
-    if len(candles) < 1200:
-        return f"⚠️ عينة M5 قصيرة ({len(candles)} شمعة). لا يمكن تقييم الاستراتيجية بثقة."
+    if len(candles) < 1000:
+        return f"⚠️ عينة M5 غير كافية ({len(candles)} شمعة). نحتاج 1000 على الأقل حتى لا نصدر حكماً مضللاً."
 
     trades = []
     i = 700
-    split = int(len(candles) * TRAIN_FRACTION)
+    split = int(len(candles) * TRAIN_FRACTION) if len(candles) >= 3000 else None
     while i < len(candles) - 1:
         # Evaluate at the start of the next M5 candle, after it has opened.
         # Candle i is closed; candle i+1 supplies only its opening price.
@@ -107,8 +107,12 @@ def run_backtest_report(data=None):
         trades.append(trade)
         i = trade["exit"] + 1
 
-    train = [t for t in trades if t["signal_index"] < split and t["exit"] < split]
-    test = [t for t in trades if t["signal_index"] >= split]
+    if split is None:
+        train = []
+        test = []
+    else:
+        train = [t for t in trades if t["signal_index"] < split and t["exit"] < split]
+        test = [t for t in trades if t["signal_index"] >= split]
     raw_cost = os.getenv("BACKTEST_ROUND_TURN_COST_R", "").strip()
     try:
         cost_r = max(0.0, float(raw_cost)) if raw_cost else 0.0
@@ -117,20 +121,19 @@ def run_backtest_report(data=None):
 
     start = datetime.fromtimestamp(candles[0]["timestamp"], timezone.utc).strftime("%Y-%m-%d")
     end = datetime.fromtimestamp(candles[-1]["timestamp"], timezone.utc).strftime("%Y-%m-%d")
-    split_at = datetime.fromtimestamp(candles[split]["timestamp"], timezone.utc).strftime("%Y-%m-%d")
+    split_at = datetime.fromtimestamp(candles[split]["timestamp"], timezone.utc).strftime("%Y-%m-%d") if split is not None else None
     lines = [
         "🧪 اختبار GOLD AI متعدد الأطر — M5/M15/H1/H4",
         f"مصدر البيانات: {data['source']} | الفترة المتاحة: {start} إلى {end}",
         f"الشموع: M5={len(data['m5'])} | M15={len(data['m15'])} | H1={len(data['h1'])} | H4={len(data['h4'])}",
-        f"تقسيم زمني: 70% تطوير حتى {split_at} / 30% اختبار مستقل",
+        (f"تقسيم زمني: 70% تطوير حتى {split_at} / 30% اختبار مستقل" if split_at else "⚠️ عينة قصيرة: فحص استكشافي فقط، دون ادعاء اختبار OOS أو صلاحية إحصائية"),
         f"تكلفة التنفيذ المفترضة: {cost_r:.4f}R لكل صفقة (اضبط BACKTEST_ROUND_TURN_COST_R لمعايرة XTB)",
         "",
-        _fmt("التطوير", train, cost_r),
-        _fmt("الاختبار المستقل OOS", test, cost_r),
-        _fmt("كل العينة", trades, cost_r),
+        *([_fmt("التطوير", train, cost_r), _fmt("الاختبار المستقل OOS", test, cost_r)] if split is not None else []),
+        _fmt("كل العينة بعد الإحماء", trades, cost_r),
         "",
         "النتائج تاريخية وليست ضماناً للأداء المستقبلي. بيانات المزود قد تختلف عن XTB،",
         "والاختبار لا يمثل التنفيذ الفعلي أو السبريد والانزلاق بدقة ما لم تُعاير تكلفة R.",
-        "لا تعتمد الاستراتيجية على نتيجة عينة قصيرة؛ راقب عدداً كافياً من الصفقات في الحساب التجريبي.",
+        "عند أقل من 3000 شمعة، لا تُعرض نتيجة OOS لأن فترة الإحماء تستهلك معظم العينة؛ نحتاج تاريخاً أطول قبل اعتماد الأداء.",
     ]
     return "\n".join(lines)
