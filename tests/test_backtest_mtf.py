@@ -35,6 +35,18 @@ class BacktestTimingTests(unittest.TestCase):
         self.assertNotIn("live_quote", first_data)
         self.assertEqual(first_now, data["m5"][701]["timestamp"] + 30)
 
+
+    def test_quality_bands_suppress_win_rate_for_small_samples(self):
+        trades = [{"r": 1.0, "quality_score": 90} for _ in range(3)]
+        report = backtest_mtf._quality_band_report(trades, cost_r=0.0, minimum_sample=20)
+        self.assertIn("90-94: 3 صفقة | عينة غير كافية", report[2])
+        self.assertNotIn("الفوز", report[2])
+
+    def test_quality_bands_report_metrics_when_sample_is_large_enough(self):
+        trades = [{"r": 1.0, "quality_score": 90} for _ in range(20)]
+        report = backtest_mtf._quality_band_report(trades, cost_r=0.0, minimum_sample=20)
+        self.assertIn("90-94: 20 صفقة | الفوز 100.0%", report[2])
+
     def test_stop_wins_when_stop_and_target_touch_same_candle(self):
         candles = [{
             "timestamp": 1_800_000_000,
