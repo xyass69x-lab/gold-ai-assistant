@@ -55,7 +55,7 @@ jobs:
           for (const [tf, rule] of Object.entries(rules)) {
             const file = fs.readdirSync(dir).find(n => n.startsWith(`xauusd-${tf}-bid-`) && n.endsWith('.csv'));
             if (!file) throw new Error(`Missing ${tf} CSV`);
-            const lines = fs.readFileSync(path.join(dir, file), 'utf8').trim().split(/\\r?\\n/);
+            const lines = fs.readFileSync(path.join(dir, file), 'utf8').trim().split(/\r?\n/);
             if (lines.length < rule.minRows + 1) throw new Error(`${tf}: only ${lines.length - 1} rows`);
             const rows = lines.slice(1).map(line => line.split(',').map(Number));
             let previous = 0;
