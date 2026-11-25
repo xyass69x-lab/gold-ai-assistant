@@ -100,6 +100,35 @@ def test_scalp_uses_fresh_spot_quote_after_90_second_window(monkeypatch):
     assert signal["entry"] == round(bars[-1]["close"] + 0.03, 3)
 
 
+
+def test_scalp_rounding_keeps_rr_at_least_two_for_small_atr(monkeypatch):
+    bars, next_ts, last = _confirmed_scalp_data()
+
+    def fake_ema(values, period):
+        result = [None] * len(values)
+        result[-1] = values[-1] - (0.1 if period == 20 else 0.2)
+        return result
+
+    monkeypatch.setattr(scalp_strategy, "ema", fake_ema)
+    monkeypatch.setattr(scalp_strategy, "rsi", lambda values, period=14: [None] * (len(values)-1) + [60.0])
+    monkeypatch.setattr(scalp_strategy, "atr", lambda candles, period=14: [None] * (len(candles)-1) + [0.00018])
+    data = {
+        "m5": bars, "h1": [], "h4": [],
+        "live_quote": {
+            "price": last["close"] + 0.02,
+            "bid": last["close"] + 0.01,
+            "ask": last["close"] + 0.03,
+            "age_seconds": 10,
+        },
+    }
+    snapshot = {"higher_timeframe_bias": {"h1": "BULLISH", "h4": "BULLISH"}}
+    signal = analyze_scalp(data, next_ts + 240, snapshot)
+    assert signal is not None
+    risk = signal["entry"] - signal["stop_loss"]
+    reward = signal["take_profit"] - signal["entry"]
+    assert reward / risk >= 2.0
+    assert validate_signal(Signal(**signal)) >= 2.0
+
 def test_scalp_rejects_stale_live_spot_quote():
     bars, next_ts, last = _confirmed_scalp_data()
     data = {
