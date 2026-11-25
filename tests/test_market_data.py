@@ -161,6 +161,21 @@ class MarketDataFetchTests(unittest.TestCase):
         self.assertEqual(age, 0)
         self.assertEqual(bars[-1]["timestamp"], now - 300)
 
+    def test_biquote_m5_accepts_recently_closed_candle_with_fresh_quote_window(self):
+        now = 1_800_000_000
+        stamp = datetime.fromtimestamp(now - 571, timezone.utc).isoformat().replace("+00:00", "Z")
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"bars": [{
+            "openTime": stamp, "open": 4000.0, "high": 4002.0,
+            "low": 3998.0, "close": 4001.0, "tickVolume": 20,
+            "isOpen": False,
+        }]}
+        with patch.object(market_data.requests, "get", return_value=response):
+            bars, age = market_data._fetch_biquote_m5(now, min_bars=1)
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(age, 271)
+
     def test_biquote_m5_rejects_late_candle(self):
         now = 1_800_000_000
         stamp = datetime.fromtimestamp(now - 1200, timezone.utc).isoformat().replace("+00:00", "Z")
