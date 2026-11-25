@@ -190,15 +190,18 @@ def analyze_mtf(data, now):
     if live_quote is not None:
         quote_age = float(live_quote.get("age_seconds", float("inf")))
         candle_age = max(0.0, now - (int(last_m5["timestamp"]) + 300))
-        entry = float(live_quote.get("price", 0.0))
+        mid = float(live_quote.get("price", 0.0))
+        entry = float(live_quote.get("ask") if side == "BUY" else live_quote.get("bid"))
         max_extension = max(0.5 * float(m5_atr), 1.0)
-        if (quote_age > 90 or candle_age > 600 or entry <= 0
-                or abs(entry - float(last_m5["close"])) > max_extension):
+        if (quote_age > 45 or candle_age > 600 or mid <= 0 or entry <= 0
+                or abs(mid - float(last_m5["close"])) > max_extension):
             snapshot["entry_pending"] = True
             snapshot["entry_reject_reason"] = "live quote stale or price extended from setup candle"
             return snapshot, None
-        snapshot["live_price"] = entry
+        snapshot["live_price"] = mid
         snapshot["live_price_age_seconds"] = int(quote_age)
+        snapshot["live_bid"] = live_quote.get("bid")
+        snapshot["live_ask"] = live_quote.get("ask")
         snapshot["entry_source"] = live_quote.get("source", "independent spot quote")
     else:
         next_ts = int(last_m5["timestamp"]) + 300
