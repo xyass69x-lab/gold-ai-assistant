@@ -141,5 +141,64 @@ class MarketDataFetchTests(unittest.TestCase):
                 market_data.fetch_live_price(now=now)
 
 
+    def test_biquote_m5_parser_uses_only_closed_fresh_bars(self):
+        now = 1_800_000_000
+        def row(ts, is_open=False):
+            stamp = datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
+            return {
+                "openTime": stamp, "open": 4000.0, "high": 4002.0,
+                "low": 3998.0, "close": 4001.0, "tickVolume": 20,
+                "isOpen": is_open,
+            }
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"bars": [
+            row(now, True), row(now - 300), row(now - 600),
+        ]}
+        with patch.object(market_data.requests, "get", return_value=response):
+            bars, age = market_data._fetch_biquote_m5(now, min_bars=2)
+        self.assertEqual(len(bars), 2)
+        self.assertEqual(age, 0)
+        self.assertEqual(bars[-1]["timestamp"], now - 300)
+
+    def test_biquote_m5_rejects_late_candle(self):
+        now = 1_800_000_000
+        stamp = datetime.fromtimestamp(now - 600, timezone.utc).isoformat().replace("+00:00", "Z")
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"bars": [{
+            "openTime": stamp, "open": 4000.0, "high": 4002.0,
+            "low": 3998.0, "close": 4001.0, "tickVolume": 20,
+            "isOpen": False,
+        }]}
+        with patch.object(market_data.requests, "get", return_value=response):
+            with self.assertRaises(market_data.MarketDataError):
+                market_data._fetch_biquote_m5(now, min_bars=1)
+
+    def test_live_market_data_separates_biquote_m5_from_xaus_higher_timeframes(self):
+        now = 1_800_000_000
+        m5 = self._bars(int(now) - 1200 * 300, 1200, 300)
+        m15 = self._bars(int(now) - 220 * 900, 220, 900)
+        h1 = self._bars(int(now) - 240 * 3600, 240, 3600)
+
+        def fake_chart(interval, period_range, cache_seconds, force=False):
+            return h1 if interval == "1h" else m15
+
+        quote = {
+            "price": 4001.0, "bid": 4000.9, "ask": 4001.1,
+            "age_seconds": 1, "source": "test MT5",
+        }
+        with patch.object(market_data, "_fetch_biquote_m5", return_value=(m5, 0)) as live_m5, \
+             patch.object(market_data, "_fetch_chart", side_effect=fake_chart), \
+             patch.object(market_data, "fetch_live_price", return_value=quote):
+            data = market_data.fetch_market_data(now=now, include_live_quote=True)
+
+        live_m5.assert_called_once()
+        self.assertIn("BiQuote M5", data["source"])
+        self.assertIn("XAUS M15/H1/H4", data["source"])
+        self.assertEqual(len(data["m15"]), 220)
+        self.assertEqual(data["live_quote"]["price"], 4001.0)
+
+
 if __name__ == "__main__":
     unittest.main()
