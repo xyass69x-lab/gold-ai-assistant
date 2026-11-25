@@ -117,15 +117,40 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self.assertEqual(signal["entry"], 121.06)
         self.assertEqual(snapshot["entry_source"], "test spot feed")
         self.assertEqual(signal["confidence"], snapshot["quality_score"])
-        self.assertEqual(snapshot["quality_score_type"], "technical_quality_v2_not_win_probability")
+        self.assertEqual(snapshot["quality_score_type"], "technical_quality_v3_not_win_probability")
         self.assertAlmostEqual(sum(snapshot["quality_score_parts"].values()), snapshot["quality_score"], delta=0.6)
         self.assertEqual(set(snapshot["quality_score_parts"]), {
-            "trend_strength_and_slope", "h1_h4_alignment", "m15_setup_quality",
+            "trend_strength_and_slope", "m15_ema_structure", "h1_h4_alignment", "m15_setup_quality",
             "m5_trigger_strength", "rsi_position",
         })
         self.assertGreaterEqual(signal["confidence"], 80)
         self.assertLessEqual(signal["confidence"], 100)
 
+
+    def test_quality_score_rewards_directional_m15_ema_stack(self):
+        self._make_live_setup()
+        patches = self._patch_indicators()
+        with patches[0], patches[1], patches[2], patches[3]:
+            baseline, signal = analyze_mtf(self.data, self.now + 271)
+        self.assertIsNotNone(signal)
+        # Keep the rest of the setup fixed while making EMA20 less aligned
+        # with EMA50 in the direction of the BUY.
+        original_ema = __import__("app.strategy_mtf", fromlist=["ema"]).ema
+        def weaker_stack(values, period):
+            result = original_ema(values, period)
+            if period == 20:
+                return [118.0] * len(values)
+            if period == 50:
+                return [119.0] * len(values)
+            return [100.0 + i * 0.01 for i in range(len(values))]
+        with patch("app.strategy_mtf.ema", side_effect=weaker_stack), \\
+             patches[1], patches[2], patches[3]:
+            weaker, weaker_signal = analyze_mtf(self.data, self.now + 271)
+        self.assertIsNotNone(weaker_signal)
+        self.assertGreater(
+            baseline["quality_score_parts"]["m15_ema_structure"],
+            weaker["quality_score_parts"]["m15_ema_structure"],
+        )
 
     def test_quality_score_rewards_stronger_m5_trigger(self):
         self._make_live_setup()
