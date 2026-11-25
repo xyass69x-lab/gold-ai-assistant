@@ -26,7 +26,7 @@ class BacktestTimingTests(unittest.TestCase):
 
     def test_backtest_evaluates_after_next_candle_opens(self):
         data = self._data()
-        with patch.object(backtest_mtf, "fetch_market_data", return_value=data), \
+        with patch.object(backtest_mtf, "fetch_historical_market_data", return_value=data), \
              patch.object(backtest_mtf, "analyze_mtf", return_value=({"setup": None}, None)) as analyze:
             backtest_mtf.run_backtest_report()
 
