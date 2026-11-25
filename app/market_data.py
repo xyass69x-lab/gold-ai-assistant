@@ -277,7 +277,7 @@ def resample_candles(candles, source_seconds, target_seconds):
 
 
 def fetch_market_data(force_refresh=False, now=None, include_live_quote=True):
-    """Return independent Yahoo OHLC candles and an optional fresh XAUS spot quote."""
+    """Return XAUS historical candles and an optional fresh BiQuote MT5 quote."""
     now = time.time() if now is None else float(now)
     m5_raw = _fetch_chart(BASE_INTERVAL, BASE_RANGE, BASE_CACHE_SECONDS, force_refresh)
     h1_raw = _fetch_chart(HTF_INTERVAL, HTF_RANGE, HTF_CACHE_SECONDS, force_refresh)
