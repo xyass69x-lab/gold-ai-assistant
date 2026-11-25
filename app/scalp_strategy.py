@@ -51,12 +51,22 @@ def analyze_scalp(data, now, snapshot=None):
     if side is None:
         return None
 
-    next_ts = int(current["timestamp"]) + 300
-    next_bar = next((b for b in data["m5"] if int(b["timestamp"]) == next_ts), None)
-    if next_bar is None or not (next_ts <= now < next_ts + 300) or now - next_ts > 90:
-        return None
+    live_quote = data.get("live_quote")
+    if live_quote is not None:
+        quote_age = float(live_quote.get("age_seconds", float("inf")))
+        candle_age = max(0.0, now - (int(current["timestamp"]) + 300))
+        entry = float(live_quote.get("price", 0.0))
+        max_extension = max(0.5 * float(atr_values[i]), 1.0)
+        if (quote_age > 90 or candle_age > 600 or entry <= 0
+                or abs(entry - float(current["close"])) > max_extension):
+            return None
+    else:
+        next_ts = int(current["timestamp"]) + 300
+        next_bar = next((b for b in data["m5"] if int(b["timestamp"]) == next_ts), None)
+        if next_bar is None or not (next_ts <= now < next_ts + 300) or now - next_ts > 90:
+            return None
+        entry = float(next_bar["open"])
 
-    entry = float(next_bar["open"])
     risk = 1.2 * float(atr_values[i])
     if side == "BUY":
         stop, tp1, tp2 = entry - risk, entry + risk, entry + 2 * risk
