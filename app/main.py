@@ -764,8 +764,28 @@ def run_engine_once():
     if snapshot["candle_age_seconds"] <= 15 * 60 and int(datetime.fromisoformat(snapshot["candle_at"]).timestamp()) % (30 * 60) == 0:
         queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
     deliver_pending_market_reports()
-    signal = Signal(**raw_signal) if raw_signal else None
-    rr = validate_signal(signal) if signal else None
+    signal = None
+    rr = None
+    if raw_signal:
+        try:
+            signal = Signal(**raw_signal)
+            rr = validate_signal(signal)
+        except (ValidationError, HTTPException, ValueError) as exc:
+            entry = float(raw_signal.get("entry") or 0)
+            stop = float(raw_signal.get("stop_loss") or 0)
+            target = float(raw_signal.get("take_profit") or 0)
+            risk = abs(entry - stop)
+            reward = abs(target - entry)
+            rejected_rr = reward / risk if risk > 0 else 0.0
+            print(
+                "SIGNAL_REJECTED "
+                f"side={raw_signal.get('side')} entry={entry:.5f} "
+                f"stop={stop:.5f} target={target:.5f} rr={rejected_rr:.5f} "
+                f"reason={type(exc).__name__}: {str(exc)[:180]}",
+                flush=True,
+            )
+            signal = None
+            rr = None
     persist_engine_result(
         snapshot["candle_at"], signal, rr, snapshot["source"],
         retry_pending=bool(snapshot.get("entry_pending", False)),
