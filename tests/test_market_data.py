@@ -116,15 +116,15 @@ class MarketDataFetchTests(unittest.TestCase):
         response = Mock()
         response.status_code = 200
         response.json.return_value = {
-            "spot_usd_oz": 4012.5,
-            "price_as_of": as_of,
-            "data_state": {"status": "fresh", "age_seconds": 12, "as_of": as_of},
+            "bid": 4012.4, "ask": 4012.6, "mid": 4012.5,
+            "lastQuoteAt": as_of, "quoteAgeSeconds": 12,
+            "marketState": "open", "stale": False, "source": "MT5 test feed",
         }
         with patch.object(market_data.requests, "get", return_value=response):
             quote = market_data.fetch_live_price(now=now)
         self.assertEqual(quote["price"], 4012.5)
         self.assertLessEqual(quote["age_seconds"], 12)
-        self.assertEqual(quote["source"], market_data.LIVE_PRICE_SOURCE)
+        self.assertEqual(quote["source"], "MT5 test feed")
 
     def test_stale_independent_spot_quote_is_rejected(self):
         now = 1_800_000_000
@@ -132,9 +132,9 @@ class MarketDataFetchTests(unittest.TestCase):
         response = unittest.mock.Mock()
         response.status_code = 200
         response.json.return_value = {
-            "spot_usd_oz": 4012.5,
-            "price_as_of": as_of,
-            "data_state": {"status": "stale", "age_seconds": 240, "as_of": as_of},
+            "bid": 4012.4, "ask": 4012.6, "mid": 4012.5,
+            "lastQuoteAt": as_of, "quoteAgeSeconds": 240,
+            "marketState": "open", "stale": True, "source": "MT5 test feed",
         }
         with patch.object(market_data.requests, "get", return_value=response):
             with self.assertRaises(market_data.MarketDataError):
