@@ -33,5 +33,9 @@ jobs:
         run: |
           python - <<'PY'
           from app.backtest_mtf import run_backtest_report
-          print(run_backtest_report())
+          from app.historical_data import fetch_historical_market_data
+          data = fetch_historical_market_data()
+          assert "AlgoSpecial" in data["source"], data["source"]
+          assert len(data["m5"]) >= 3000, f"Only {len(data['m5'])} M5 bars"
+          print(run_backtest_report(data))
           PY
