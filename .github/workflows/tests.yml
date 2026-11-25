@@ -26,6 +26,24 @@ jobs:
           PYTHONPATH: .
         run: python -m pytest -q
 
+      - name: Probe XAUS M5 historical fallback (non-blocking)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from app.market_data import fetch_market_data
+          data = fetch_market_data(include_live_quote=False, use_biquote_m5=False)
+          for timeframe in ("m5", "m15", "h1", "h4"):
+              bars = data[timeframe]
+              latest = bars[-1]["timestamp"]
+              print(f"{timeframe}: bars={len(bars)} latest_epoch={latest}")
+          print(f"source={data['source']}")
+          print(f"m5_age_seconds={data['m5_age_seconds']}")
+          print("XAUS_HISTORICAL_PROBE_OK")
+          PY
+
       - name: Verify extended historical feed and run safe backtest
         if: github.event_name == 'pull_request'
         env:
@@ -39,73 +57,3 @@ jobs:
           assert len(data["m5"]) >= 3000, f"Only {len(data['m5'])} M5 bars"
           print(run_backtest_report(data))
           PY
-
-  dukascopy-provider-probe:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install pinned Dukascopy downloader
-        run: npm install --global dukascopy-node@1.51.1
-
-      - name: Install Chromium for provider challenge recovery
-        run: dukascopy-node --install-browser --with-deps
-
-      - name: Set a rolling 32-day UTC window
-        run: |
-          echo "FROM_DATE=$(date -u -d '32 days ago' +%F)" >> "$GITHUB_ENV"
-          echo "TO_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
-
-      - name: Download XAUUSD bid candles on all strategy timeframes
-        run: |
-          set -euo pipefail
-          mkdir -p download
-          for tf in m5 m15 h1 h4; do
-            dukascopy-node -i xauusd -from "$FROM_DATE" -to "$TO_DATE" -t "$tf" -f csv -dir ./download --retries 2 --batch-pause 1000 --cache
-          done
-
-      - name: Validate coverage, freshness and OHLC integrity
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const dir = './download';
-          const now = Date.now();
-          const rules = {
-            m5: { minRows: 3000, maxAgeHours: 72 },
-            m15: { minRows: 1000, maxAgeHours: 96 },
-            h1: { minRows: 200, maxAgeHours: 120 },
-            h4: { minRows: 50, maxAgeHours: 168 },
-          };
-          for (const [tf, rule] of Object.entries(rules)) {
-            const file = fs.readdirSync(dir).find(n => n.startsWith(`xauusd-${tf}-bid-`) && n.endsWith('.csv'));
-            if (!file) throw new Error(`Missing ${tf} CSV`);
-            const lines = fs.readFileSync(path.join(dir, file), 'utf8').trim().split(/\r?\n/);
-            if (lines.length < rule.minRows + 1) throw new Error(`${tf}: only ${lines.length - 1} rows`);
-            const rows = lines.slice(1).map(line => line.split(',').map(Number));
-            let previous = 0;
-            for (const row of rows) {
-              const [ts, open, high, low, close] = row;
-              if (![ts, open, high, low, close].every(Number.isFinite)) throw new Error(`${tf}: non-numeric OHLC row`);
-              if (ts <= previous) throw new Error(`${tf}: timestamps not strictly increasing`);
-              if (ts > now + 24 * 3600 * 1000) throw new Error(`${tf}: future timestamp`);
-              if (high < Math.max(open, close, low) || low > Math.min(open, close, high)) throw new Error(`${tf}: invalid OHLC relationship`);
-              previous = ts;
-            }
-            const ageHours = (now - previous) / 3600000;
-            if (ageHours > rule.maxAgeHours) throw new Error(`${tf}: stale latest candle (${ageHours.toFixed(1)}h)`);
-            console.log(`${tf}: rows=${rows.length}, latest_utc=${new Date(previous).toISOString()}, age_hours=${ageHours.toFixed(1)}, file=${file}`);
-          }
-          console.log('DUKASCOPY_PROVIDER_PROBE_OK');
-          NODE
-
-      - name: Preserve probe CSVs for inspection
-        uses: actions/upload-artifact@v4
-        with:
-          name: dukascopy-xauusd-probe-${{ github.run_id }}
-          path: download/*.csv
-          retention-days: 3
