@@ -196,7 +196,7 @@ load_history()
 ENGINE_STATE = {
     "status": "starting",
     "message": "يتم تهيئة محرك تحليل الذهب",
-    "source": "Twelve Data XAU/USD spot",
+    "source": "XAUS chart OHLC (Yahoo Finance proxy)",
     "timeframe": "M5/M15/H1/H4",
     "price": None,
     "last_candle": None,
@@ -674,7 +674,7 @@ def build_market_report(candles, snapshot):
     return (
         "📊 تقرير الذهب الدوري — XAU/USD\n"
         "الإطار: M5 / M15 / H1 / H4 | التقرير بعد إغلاق شمعة جديدة\n"
-        f"إغلاق آخر شمعة: {price:.2f} دولار (Twelve Data)\n"
+        f"إغلاق آخر شمعة: {price:.2f} دولار (XAUS chart OHLC)\n"
         f"وقت الإغلاق بتوقيت عُمان: {oman_close} | عمر البيانات: {candle_age_minutes} دقيقة\n"
         "هذا سعر إغلاق شمعة، وليس سعر XTB اللحظي أو سعر تنفيذ.\n"
         f"الاتجاه: {direction}\n"
@@ -683,7 +683,7 @@ def build_market_report(candles, snapshot):
         f"منطقة المراقبة: {watch}\n"
         f"EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | EMA200: {ema200:.2f} | RSI: {rsi_text}\n"
         f"ملاحظة: {condition}\n"
-        "الأسعار والمناطق من Twelve Data وقد تختلف عن XTB؛ تحقق من Bid/Ask على XTB قبل أي تنفيذ.\n"
+        "الأسعار والمناطق من XAUS chart OHLC وقد تختلف عن XTB؛ تحقق من Bid/Ask على XTB قبل أي تنفيذ.\n"
         "لا توجد توصية دخول مؤكدة في هذا التقرير؛ إشارات الاستراتيجية الأصلية تصلك برسالة مستقلة عند تحقق شروطها.\n"
         f"وقت الشمعة: {candle_time}\n"
         "تحليل فني احتمالي، وليس ضماناً للربح. تحقق من السعر والسبريد قبل أي قرار."
