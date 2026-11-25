@@ -25,3 +25,13 @@ jobs:
           DATABASE_PATH: /tmp/gold-ai-assistant-tests/signals.db
           PYTHONPATH: .
         run: python -m pytest -q
+
+      - name: Verify independent historical feed and run walk-forward backtest
+        if: github.event_name == 'pull_request'
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from app.backtest_mtf import run_backtest_report
+          print(run_backtest_report())
+          PY
