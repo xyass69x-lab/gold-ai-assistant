@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from app.strategy_mtf import _bias, analyze_mtf, ema
 
@@ -74,6 +75,53 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         snapshot, signal = analyze_mtf(self.data, self.now)
         self.assertEqual(snapshot["higher_timeframe_bias"]["h1"], "UNAVAILABLE")
         self.assertEqual(snapshot["higher_timeframe_bias"]["h4"], "UNAVAILABLE")
+        self.assertIsNone(signal)
+
+
+    def _make_live_setup(self, quote_age=10):
+        self.data["m15"][-1].update({
+            "open": 121.4, "high": 122.1, "low": 120.0, "close": 122.0,
+        })
+        self.data["m5"][-2].update({
+            "open": 120.3, "high": 120.8, "low": 120.2, "close": 120.5,
+        })
+        self.data["m5"][-1].update({
+            "open": 120.5, "high": 121.2, "low": 120.4, "close": 121.0,
+        })
+        self.data["live_quote"] = {
+            "price": 121.05, "age_seconds": quote_age,
+            "source": "test spot feed",
+        }
+        self.data["m5_age_seconds"] = 240
+
+    def _patch_indicators(self):
+        def fake_ema(values, period):
+            if period == 20:
+                return [120.0] * len(values)
+            if period == 50:
+                return [119.0] * len(values)
+            return [100.0 + i * 0.01 for i in range(len(values))]
+        return (
+            patch("app.strategy_mtf.ema", side_effect=fake_ema),
+            patch("app.strategy_mtf.rsi", side_effect=lambda values, period=14: [60.0] * len(values)),
+            patch("app.strategy_mtf.atr", side_effect=lambda candles, period=14: [1.0] * len(candles)),
+            patch("app.strategy_mtf._bias", return_value="BULLISH"),
+        )
+
+    def test_live_quote_allows_actionable_entry_after_90_seconds(self):
+        self._make_live_setup()
+        patches = self._patch_indicators()
+        with patches[0], patches[1], patches[2], patches[3]:
+            snapshot, signal = analyze_mtf(self.data, self.now + 240)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["entry"], 121.05)
+        self.assertEqual(snapshot["entry_source"], "test spot feed")
+
+    def test_stale_live_quote_blocks_mtf_signal(self):
+        self._make_live_setup(quote_age=120)
+        patches = self._patch_indicators()
+        with patches[0], patches[1], patches[2], patches[3]:
+            _, signal = analyze_mtf(self.data, self.now + 240)
         self.assertIsNone(signal)
 
 
