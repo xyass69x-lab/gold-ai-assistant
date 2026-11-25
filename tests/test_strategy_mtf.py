@@ -125,5 +125,17 @@ class MultiTimeframeStrategyTests(unittest.TestCase):
         self.assertIsNone(signal)
 
 
+    def test_mtf_rejects_live_price_diverged_from_higher_timeframe_candle(self):
+        self._make_live_setup()
+        self.data["m15"][-1].update({
+            "open": 122.8, "high": 123.6, "low": 122.7, "close": 123.5,
+        })
+        patches = self._patch_indicators()
+        with patches[0], patches[1], patches[2], patches[3]:
+            snapshot, signal = analyze_mtf(self.data, self.now + 240)
+        self.assertIsNone(signal)
+        self.assertIn("diverged", snapshot["entry_reject_reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
