@@ -199,7 +199,7 @@ def analyze_mtf(data, now):
         entry = float(live_quote.get("ask") if side == "BUY" else live_quote.get("bid"))
         max_extension = max(0.5 * float(m5_atr), 1.0)
         max_m15_extension = max(1.5 * float(m15_atr), 2.0)
-        if (quote_age > 45 or candle_age > 300 or mid <= 0 or entry <= 0
+        if (quote_age > 45 or candle_age > 600 or mid <= 0 or entry <= 0
                 or abs(mid - float(last_m5["close"])) > max_extension
                 or abs(mid - float(current["close"])) > max_m15_extension):
             snapshot["entry_pending"] = True
