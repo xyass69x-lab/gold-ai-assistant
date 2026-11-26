@@ -424,7 +424,7 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
     if not m1 or not d1:
         raise MarketDataError("لا توجد شموع M1/D1 مغلقة")
     if now - (m1[-1]["timestamp"] + 60) > 180:
-        raise MarketDataError("آخر شمعة M1 قديمة")
+        m1 = []  # XAUS M1 unavailable/stale: never use stale candles
     if now - (d1[-1]["timestamp"] + 86400) > 345600:
         raise MarketDataError("آخر شمعة D1 قديمة")
     return {
