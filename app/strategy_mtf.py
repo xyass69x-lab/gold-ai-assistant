@@ -85,7 +85,7 @@ def analyze_mtf(data, now):
     m5, m15, h1, h4 = (data[k] for k in ("m5", "m15", "h1", "h4"))
     m1_closed = [b for b in data["m1"] if int(b["timestamp"]) + 60 <= now]
     d1_closed = [b for b in data["d1"] if int(b["timestamp"]) + 86400 <= now]
-    if not m1_closed or len(d1_closed) < 50:
+    if len(d1_closed) < 50:
         raise ValueError("شموع M1/D1 غير كافية")
     m5_closed = [b for b in m5 if int(b["timestamp"]) + 300 <= now]
     m15_closed = [b for b in m15 if int(b["timestamp"]) + 900 <= now]
@@ -125,7 +125,7 @@ def analyze_mtf(data, now):
         "ema20": e20[i], "ema50": e50[i], "ema200": e200[i],
         "rsi14": rsi_values[i], "atr14": m15_atr,
         "candle_age_seconds": data["m5_age_seconds"],
-        "m1_close": m1_closed[-1]["close"],
+        "m1_close": m1_closed[-1]["close"] if m1_closed else None,
         "m1_age_seconds": data["m1_age_seconds"],
         "higher_timeframe_bias": {"h1": h1_bias, "h4": h4_bias, "d1": d1_bias},
     }
