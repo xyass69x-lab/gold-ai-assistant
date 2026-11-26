@@ -372,7 +372,17 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
 
     h1_age = now - (h1_closed[-1]["timestamp"] + HTF_SECONDS)
     if h1_age < 0 or h1_age > MAX_H1_AGE_SECONDS:
-        raise MarketDataError("آخر شمعة H1 من XAUS قديمة؛ أوقفنا الإشارات.")
+        # A cached chart may remain stale after the upstream feed updates.
+        # Retry once without cache; never relax the freshness guard.
+        h1_raw = _fetch_chart(HTF_INTERVAL, HTF_RANGE, HTF_CACHE_SECONDS, force=True)
+        h1_closed = _closed_only(h1_raw, HTF_SECONDS, now)
+        if not h1_closed:
+            raise MarketDataError("لا توجد شموع H1 مغلقة من XAUS")
+        h1_age = now - (h1_closed[-1]["timestamp"] + HTF_SECONDS)
+        if h1_age < 0 or h1_age > MAX_H1_AGE_SECONDS:
+            raise MarketDataError(
+                f"آخر شمعة H1 من XAUS قديمة ({int(max(0, h1_age) / 60)} دقيقة)؛ أوقفنا الإشارات."
+            )
     if len(h1_closed) < MIN_H1_CANDLES:
         raise MarketDataError(
             f"بيانات H1 غير كافية: {len(h1_closed)} شمعة، نحتاج {MIN_H1_CANDLES}."
