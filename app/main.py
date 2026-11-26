@@ -761,8 +761,12 @@ def run_engine_once():
         "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup", "scalp_quality")},
     }
 
-    if snapshot["candle_age_seconds"] <= 15 * 60 and int(datetime.fromisoformat(snapshot["candle_at"]).timestamp()) % (30 * 60) == 0:
-        queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
+    # Schedule by UTC half-hour bucket, even if the exact boundary candle was missed.
+    if 0 <= snapshot["candle_age_seconds"] <= 10 * 60:
+        report_time = datetime.fromtimestamp(
+            int(datetime.now(timezone.utc).timestamp()) // 1800 * 1800, timezone.utc
+        ).isoformat()
+        queue_market_report(report_time, build_market_report(candles, snapshot))
     deliver_pending_market_reports()
     signal = None
     rr = None
