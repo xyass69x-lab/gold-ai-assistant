@@ -40,8 +40,17 @@ def analyze_structure(data, now, snapshot):
     # Reject stale/distant entries rather than chase a broken level.
     if abs(entry-c) > max(1.0, (float(bar["high"])-float(bar["low"]))):
         return None
+    # Round the risk distance outward so the 2R validator cannot reject
+    # an otherwise valid setup due to independent price rounding.
+    entry, stop = round(entry, 3), round(stop, 3)
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+    direction = 1 if side == "BUY" else -1
+    targets = (round(entry + direction * risk, 3),
+               round(entry + direction * 2 * risk, 3))
     return {
-        "symbol": "XAUUSD", "side": side, "entry": round(entry, 3),
+        "symbol": "XAUUSD", "side": side, "entry": entry,
         "stop_loss": round(stop, 3), "take_profit_1": round(targets[0], 3),
         "take_profit": round(targets[1], 3), "timeframe": "M5 STRUCTURE",
         "reason": f"كسر مستوى مؤكد {level:.3f} بإغلاق شمعة M5",
