@@ -35,7 +35,7 @@ MIN_H1_CANDLES = 60
 MIN_H4_CANDLES = 50
 SOURCE_NAME = "XAUS chart OHLC (Yahoo Finance proxy)"
 LIVE_PRICE_SOURCE = "BiQuote XAUUSD MT5 quote"
-INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "15m": M15_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS}
+INTERVAL_SECONDS = {"5m": BASE_SECONDS, "5min": BASE_SECONDS, "15m": M15_SECONDS, "1h": HTF_SECONDS, "60min": HTF_SECONDS, "1m": 60, "1d": 86400}
 _CACHE = {}
 
 
@@ -418,7 +418,17 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
             f"بيانات H4 غير كافية: {len(h4_closed)} شمعة، نحتاج {MIN_H4_CANDLES}."
         )
 
+    # Additional context; reject stale or incomplete data downstream.
+    m1 = _closed_only(_fetch_chart("1m", "5d", 60, force_refresh), 60, now)
+    d1 = _closed_only(_fetch_chart("1d", "2y", 86400, force_refresh), 86400, now)
+    if not m1 or not d1:
+        raise MarketDataError("لا توجد شموع M1/D1 مغلقة")
+    if now - (m1[-1]["timestamp"] + 60) > 180:
+        raise MarketDataError("آخر شمعة M1 قديمة")
+    if now - (d1[-1]["timestamp"] + 86400) > 345600:
+        raise MarketDataError("آخر شمعة D1 قديمة")
     return {
+        "m1": m1, "d1": d1,
         "symbol": "XAUUSD",
         "source": source,
         "live_price_source": LIVE_PRICE_SOURCE,
