@@ -429,6 +429,7 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
         raise MarketDataError("آخر شمعة D1 قديمة")
     return {
         "m1": m1, "d1": d1,
+        "m1_age_seconds": int(max(0, now - (m1[-1]["timestamp"] + 60))) if m1 else None,
         "symbol": "XAUUSD",
         "source": source,
         "live_price_source": LIVE_PRICE_SOURCE,
