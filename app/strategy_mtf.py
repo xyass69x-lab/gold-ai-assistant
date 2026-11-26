@@ -83,6 +83,10 @@ def _bias(candles, close_time, seconds):
 def analyze_mtf(data, now):
     """Return (snapshot, signal); no signal unless every timeframe is valid."""
     m5, m15, h1, h4 = (data[k] for k in ("m5", "m15", "h1", "h4"))
+    m1_closed = [b for b in data["m1"] if int(b["timestamp"]) + 60 <= now]
+    d1_closed = [b for b in data["d1"] if int(b["timestamp"]) + 86400 <= now]
+    if not m1_closed or len(d1_closed) < 50:
+        raise ValueError("شموع M1/D1 غير كافية")
     m5_closed = [b for b in m5 if int(b["timestamp"]) + 300 <= now]
     m15_closed = [b for b in m15 if int(b["timestamp"]) + 900 <= now]
     if len(m5_closed) < 3 or len(m15_closed) < 220:
@@ -92,6 +96,7 @@ def analyze_mtf(data, now):
     setup_close_time = int(setup_bar["timestamp"]) + 900
     h1_bias = _bias(h1, setup_close_time, 3600)
     h4_bias = _bias(h4, setup_close_time, 14400)
+    d1_bias = _bias(d1_closed, setup_close_time, 86400)
 
     closes = [bar["close"] for bar in m15_closed]
     e20, e50, e200 = ema(closes, 20), ema(closes, 50), ema(closes, 200)
@@ -111,7 +116,7 @@ def analyze_mtf(data, now):
         "live_price_age_seconds": (data.get("live_quote") or {}).get("age_seconds"),
         "live_bid": (data.get("live_quote") or {}).get("bid"),
         "live_ask": (data.get("live_quote") or {}).get("ask"),
-        "timeframe": "M5/M15/H1/H4",
+        "timeframe": "M1/M5/M15/H1/H4/D1",
         "price": last_m5["close"],
         "candle_at": __import__("datetime").datetime.fromtimestamp(
             last_m5["timestamp"], __import__("datetime").timezone.utc
@@ -120,7 +125,9 @@ def analyze_mtf(data, now):
         "ema20": e20[i], "ema50": e50[i], "ema200": e200[i],
         "rsi14": rsi_values[i], "atr14": m15_atr,
         "candle_age_seconds": data["m5_age_seconds"],
-        "higher_timeframe_bias": {"h1": h1_bias, "h4": h4_bias},
+        "m1_close": m1_closed[-1]["close"],
+        "m1_age_seconds": data["m1_age_seconds"],
+        "higher_timeframe_bias": {"h1": h1_bias, "h4": h4_bias, "d1": d1_bias},
     }
 
     values = (e20[i], e50[i], e200[i], rsi_values[i], m15_atr, m5_atr)
@@ -138,7 +145,7 @@ def analyze_mtf(data, now):
 
     opposing = "BEARISH" if side == "BUY" else "BULLISH"
     agreeing = "BULLISH" if side == "BUY" else "BEARISH"
-    if h1_bias in (opposing, "UNAVAILABLE") or h4_bias in (opposing, "UNAVAILABLE") or agreeing not in (h1_bias, h4_bias):
+    if d1_bias in (opposing, "UNAVAILABLE") or h1_bias in (opposing, "UNAVAILABLE") or h4_bias in (opposing, "UNAVAILABLE") or agreeing not in (h1_bias, h4_bias):
         snapshot["setup"] = None
         return snapshot, None
 
@@ -299,7 +306,7 @@ def analyze_mtf(data, now):
     return snapshot, {
         "symbol": "XAUUSD", "side": side, "entry": entry_out,
         "stop_loss": round(stop, 4), "take_profit_1": round(tp1, 4),
-        "take_profit": round(tp2, 4), "timeframe": "M5/M15",
+        "take_profit": round(tp2, 4), "timeframe": "M1/M5/M15/H1/H4/D1",
         "confidence": score,
         "reason": (
             f"{setup} على M15؛ اتجاه H1={h1_bias} وH4={h4_bias}؛ "
