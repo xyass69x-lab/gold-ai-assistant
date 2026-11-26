@@ -347,7 +347,14 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
 
     if use_biquote_m5:
         m5_raw, m5_age = _fetch_biquote_m5(now)
+        # Rebuild recent higher timeframes from the fresh closed M5 feed.
+        # Retain XAUS historical depth, but never use its stale tail as live data.
+        live_h1 = resample_candles(m5_raw, BASE_SECONDS, HTF_SECONDS)
+        live_m15 = resample_candles(m5_raw, BASE_SECONDS, M15_SECONDS)
+        h1_raw = sorted({b["timestamp"]: b for b in h1_raw + live_h1}.values(), key=lambda b: b["timestamp"])
         m15_raw = _fetch_chart(M15_INTERVAL, HTF_RANGE, 15 * 60, force_refresh)
+        m15_raw = sorted({b["timestamp"]: b for b in m15_raw + live_m15}.values(), key=lambda b: b["timestamp"])
+        h1_closed = _closed_only(h1_raw, HTF_SECONDS, now)
         source = "BiQuote M5 OHLC + XAUS M15/H1/H4 OHLC"
         min_m5 = MIN_LIVE_M5_CANDLES
     else:
