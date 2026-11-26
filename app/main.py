@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.market_data import fetch_market_data
 from app.strategy_mtf import analyze_mtf
 from app.scalp_strategy import analyze_scalp
+from app.structure_strategy import analyze_structure
 from app.trade_tracker import evaluate_trade_candle
 
 load_dotenv()
@@ -728,6 +729,9 @@ def run_engine_once():
     market_data = fetch_market_data()
     candles = market_data["m5"]
     snapshot, raw_signal = analyze_mtf(market_data, time.time())
+    structure_signal = analyze_structure(market_data, time.time(), snapshot)
+    if structure_signal is not None:
+        raw_signal = structure_signal
     if raw_signal is None:
         scalp_signal = analyze_scalp(market_data, time.time(), snapshot)
         if scalp_signal is not None:
