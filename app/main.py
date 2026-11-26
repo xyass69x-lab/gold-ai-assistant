@@ -243,7 +243,8 @@ def validate_signal(s: Signal) -> float:
     if risk <= 0:
         raise HTTPException(400, "مسافة وقف الخسارة غير صالحة")
     rr = reward / risk
-    if not math.isfinite(rr) or rr < 2:
+    # Avoid rejecting exact 2R targets due to floating-point rounding.
+    if not math.isfinite(rr) or rr < 2 - 1e-9:
         raise HTTPException(400, "تم رفض الإشارة: العائد إلى المخاطرة أقل من 1:2")
     return rr
 
