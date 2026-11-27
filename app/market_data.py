@@ -396,11 +396,12 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
         )
 
     # H4 removed from test engine
-    h4_raw = []
     m15_closed = _closed_only(m15_raw, M15_SECONDS, now)
-    h4_closed = _closed_only(h4_raw, 4 * HTF_SECONDS, now)
     if not m15_closed:
         raise MarketDataError("لا توجد شموع M15 مغلقة من مصدر الشموع")
+    m15_age = now - (m15_closed[-1]["timestamp"] + M15_SECONDS)
+    if m15_age < 0 or m15_age > MAX_M15_AGE_SECONDS:
+        raise MarketDataError("آخر شمعة M15 قديمة؛ أوقفنا الإشارات.")
     if len(m15_closed) < MIN_M15_CANDLES:
         raise MarketDataError(
             f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج {MIN_M15_CANDLES}."
@@ -424,7 +425,6 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
         "m5": m5_raw,
         "m15": m15_raw,
         "h1": h1_raw,
-        "h4": h4_raw,
         "checked_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
         "m5_age_seconds": int(max(0, m5_age)),
         "m15_age_seconds": int(max(0, m15_age)),
