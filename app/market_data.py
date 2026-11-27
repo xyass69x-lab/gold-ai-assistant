@@ -399,7 +399,20 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
     # incompatible H1 timestamp grids and stale historical H4 tails.
     h4_raw = resample_candles(h1_raw, HTF_SECONDS, 4 * HTF_SECONDS)
     if use_biquote_m5:
+        # Use the most recent 48 contiguous closed M5 bars even when the
+        # upstream feed is offset from UTC H4 boundaries.
         live_h4 = resample_candles(m5_closed, BASE_SECONDS, 4 * HTF_SECONDS)
+        if not live_h4 and len(m5_closed) >= 48:
+            tail = m5_closed[-48:]
+            if all(int(tail[i]["timestamp"]) - int(tail[i-1]["timestamp"]) == BASE_SECONDS for i in range(1, len(tail))):
+                live_h4 = [{
+                    "timestamp": tail[0]["timestamp"],
+                    "open": tail[0]["open"],
+                    "high": max(b["high"] for b in tail),
+                    "low": min(b["low"] for b in tail),
+                    "close": tail[-1]["close"],
+                    "volume": None,
+                }]
         h4_raw = sorted(
             {b["timestamp"]: b for b in h4_raw + live_h4}.values(),
             key=lambda b: b["timestamp"],
