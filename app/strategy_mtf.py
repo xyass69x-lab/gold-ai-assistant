@@ -82,7 +82,7 @@ def _bias(candles, close_time, seconds):
 
 def analyze_mtf(data, now):
     """Return (snapshot, signal); no signal unless every timeframe is valid."""
-    m5, m15, h1, _unused = (data[k] for k in ("m5", "m15", "h1"))
+    m5, m15, h1 = (data[k] for k in ("m5", "m15", "h1"))
     m1_closed = [b for b in data.get("m1", []) if int(b["timestamp"]) + 60 <= now]
     d1_closed = [b for b in data["d1"] if int(b["timestamp"]) + 86400 <= now]
     if len(d1_closed) < 50:
