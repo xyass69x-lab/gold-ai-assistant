@@ -2,7 +2,7 @@ name: Python tests
 
 on:
   push:
-    branches: ["main", "autonomous-gold-engine"]
+    branches: ["main", "autonomous-gold-engine", "feature/multi-timeframe-engine"]
   pull_request:
     branches: ["main"]
 
@@ -15,8 +15,45 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
       - name: Compile Python modules
         run: python -m compileall -q app tests
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+      - name: Run all tests
+        env:
+          DATABASE_PATH: /tmp/gold-ai-assistant-tests/signals.db
+          PYTHONPATH: .
+        run: python -m pytest -q
+
+      - name: Probe XAUS M5 historical fallback (non-blocking)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from app.market_data import fetch_market_data
+          data = fetch_market_data(include_live_quote=False, use_biquote_m5=False)
+          for timeframe in ("m5", "m15", "h1", "h4"):
+              bars = data[timeframe]
+              latest = bars[-1]["timestamp"]
+              print(f"{timeframe}: bars={len(bars)} latest_epoch={latest}")
+          print(f"source={data['source']}")
+          print(f"m5_age_seconds={data['m5_age_seconds']}")
+          print("XAUS_HISTORICAL_PROBE_OK")
+          PY
+
+      - name: Verify extended historical feed and run safe backtest
+        if: github.event_name == 'pull_request'
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from app.backtest_mtf import run_backtest_report
+          from app.historical_data import fetch_historical_market_data
+          data = fetch_historical_market_data()
+          assert "AlgoSpecial" in data["source"], data["source"]
+          assert len(data["m5"]) >= 3000, f"Only {len(data['m5'])} M5 bars"
+          print(run_backtest_report(data))
+          PY

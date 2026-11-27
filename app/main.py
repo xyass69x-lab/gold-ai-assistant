@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import sqlite3
+import time
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,16 +16,25 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from app.market_engine import analyze_latest_closed_candle, fetch_candles
+from app.market_data import fetch_market_data
+from app.strategy_mtf import analyze_mtf
+from app.scalp_strategy import analyze_scalp
+from app.structure_strategy import analyze_structure
 from app.trade_tracker import evaluate_trade_candle
 
 load_dotenv()
+
+
+def safe_test_mode():
+    """True disables all Telegram webhook registration and outbound messages."""
+    return os.getenv("SAFE_TEST_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
 
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(APP_DIR.parent / "data" / "signals.db")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Gold AI Assistant", version="0.5.0")
+app = FastAPI(title="Gold AI Assistant", version="0.6.0")
 LATEST = {"status": "waiting", "message": "لا توجد إشارات بعد", "updated": None}
 HISTORY = []
 MAX_HISTORY = 200
@@ -188,8 +198,9 @@ load_history()
 ENGINE_STATE = {
     "status": "starting",
     "message": "يتم تهيئة محرك تحليل الذهب",
-    "source": "Twelve Data XAU/USD spot (Gold Spot / US Dollar)",
-    "timeframe": "30m",
+    "source": "XAUS chart OHLC (Yahoo Finance proxy)",
+    "live_price_source": "BiQuote XAUUSD MT5 quote",
+    "timeframe": "M5/M15/H1/H4",
     "price": None,
     "last_candle": None,
     "last_checked": None,
@@ -197,7 +208,7 @@ ENGINE_STATE = {
     "indicators": {},
 }
 ENGINE_TASK = None
-ENGINE_POLL_SECONDS = max(30, min(60, int(os.getenv("ENGINE_POLL_SECONDS", "60"))))
+ENGINE_POLL_SECONDS = max(30, min(60, int(os.getenv("ENGINE_POLL_SECONDS", "30"))))
 
 
 def validate_signal(s: Signal) -> float:
@@ -233,12 +244,15 @@ def validate_signal(s: Signal) -> float:
     if risk <= 0:
         raise HTTPException(400, "مسافة وقف الخسارة غير صالحة")
     rr = reward / risk
-    if not math.isfinite(rr) or rr < 2:
+    # Avoid rejecting exact 2R targets due to floating-point rounding.
+    if not math.isfinite(rr) or rr < 2 - 1e-9:
         raise HTTPException(400, "تم رفض الإشارة: العائد إلى المخاطرة أقل من 1:2")
     return rr
 
 
 def configure_telegram_webhook():
+    if safe_test_mode():
+        return False, "SAFE_TEST_MODE enabled; Telegram webhook registration is disabled"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
@@ -258,6 +272,8 @@ def configure_telegram_webhook():
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
+    if safe_test_mode():
+        raise HTTPException(503, "Telegram is disabled in safe test mode")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     expected_secret = hashlib.sha256(token.encode()).hexdigest() if token else ""
     supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -286,10 +302,7 @@ async def telegram_webhook(request: Request):
             state = ENGINE_STATE.get("status", "unknown")
             detail = ENGINE_STATE.get("message", "")
             error_detail = str(ENGINE_STATE.get("last_error") or "").strip()
-            # Never expose provider URLs or API credentials in Telegram diagnostics.
-            api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
-            if api_key:
-                error_detail = error_detail.replace(api_key, "[مخفي]")
+            # Never expose API credentials in Telegram diagnostics.
             error_detail = error_detail.replace("apikey=", "apikey=[مخفي]&")
             with closing(_db()) as conn:
                 active_count = conn.execute("SELECT COUNT(*) FROM signals WHERE status IN ('OPEN','TP1_HIT')").fetchone()[0]
@@ -311,7 +324,7 @@ async def telegram_webhook(request: Request):
             reply = active_trades_report()
         elif command == "/backtest":
             try:
-                from app.backtest import run_backtest_report
+                from app.backtest_mtf import run_backtest_report
                 reply = await asyncio.to_thread(run_backtest_report)
             except Exception as exc:
                 reply = f"⚠️ تعذر إكمال الاختبار التاريخي: {str(exc)[:250]}"
@@ -344,6 +357,8 @@ def _telegram_message_chunks(message: str, limit: int = 4000):
 
 
 def telegram_send_to_chat(chat_id: str, message: str):
+    if safe_test_mode():
+        return False, "Telegram outbound delivery disabled by SAFE_TEST_MODE"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
@@ -372,6 +387,8 @@ def telegram_send_to_chat(chat_id: str, message: str):
 
 
 def telegram_send(message: str):
+    if safe_test_mode():
+        return False, "Telegram outbound delivery disabled by SAFE_TEST_MODE"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return False, "TELEGRAM_BOT_TOKEN is missing"
@@ -408,7 +425,8 @@ def _signal_message(signal: Signal, rr: float, source: str):
         f"TP1: {signal.take_profit_1 if signal.take_profit_1 is not None else 'غير محدد'}\n"
         f"TP2: {signal.take_profit}\n"
         f"العائد/المخاطرة إلى TP2: 1:{rr:.2f}\n"
-        "إدارة الصفقة: إغلاق 50% عند TP1؛ ثم نقل وقف الكمية المتبقية إلى الدخول؛ TP2 للكمية المتبقية.\n"
+        + (f"الجودة الفنية: {signal.confidence}/100 (ليست نسبة احتمال الربح)\n" if signal.confidence is not None else "")
+        + "إدارة الصفقة: إغلاق 50% عند TP1؛ ثم نقل وقف الكمية المتبقية إلى الدخول؛ TP2 للكمية المتبقية.\n"
         "صلاحية المتابعة: 24 ساعة من إشارة الدخول.\n"
         f"السبب: {signal.reason}\n"
         f"المصدر: {source}\n"
@@ -426,12 +444,14 @@ def persist_engine_result(
     """Atomically claim a candle; leave pending-entry candles eligible for retry."""
     with closing(_db()) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        if signal is None and retry_pending:
+        # A no-signal evaluation must not consume this candle: provider data
+        # can arrive late, and a valid signal may appear within the entry window.
+        if signal is None or rr is None:
             conn.rollback()
             return False
         claimed = conn.execute(
             "INSERT OR IGNORE INTO processed_candles(symbol,timeframe,candle_at) VALUES(?,?,?)",
-            ("XAUUSD", "30m", candle_at),
+            ("XAUUSD", "5m", candle_at),
         )
         if claimed.rowcount == 0:
             conn.commit()
@@ -454,7 +474,7 @@ def persist_engine_result(
                 INSERT OR IGNORE INTO notification_outbox
                 (signal_id, symbol, timeframe, candle_at, message, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (cursor.lastrowid, "XAUUSD", "30m", candle_at, message, now))
+            """, (cursor.lastrowid, "XAUUSD", "5m", candle_at, message, now))
         conn.commit()
         return True
 
@@ -463,7 +483,7 @@ def track_open_trades(candles, now=None):
     """Evaluate only completed candles and queue each trade-state alert once."""
     now = datetime.now(timezone.utc).timestamp() if now is None else now
     completed = sorted(
-        [bar for bar in candles if bar["timestamp"] + 30 * 60 <= now],
+        [bar for bar in candles if bar["timestamp"] + 5 * 60 <= now],
         key=lambda bar: bar["timestamp"],
     )
     with closing(_db()) as conn:
@@ -516,7 +536,7 @@ def track_open_trades(candles, now=None):
             current_status, current_tp1, last_ts = new_status, new_tp1, ts
             if current_status not in ("OPEN", "TP1_HIT"):
                 break
-            if ts - signal_ts >= 48 * 30 * 60:
+            if ts - signal_ts >= 288 * 5 * 60:
                 current_status = "EXPIRED"
                 with closing(_db()) as conn:
                     conn.execute("""
@@ -594,14 +614,14 @@ def build_market_report(candles, snapshot):
     now = datetime.now(timezone.utc)
     completed = [
         bar for bar in candles
-        if bar["timestamp"] + 30 * 60 <= now.timestamp()
+        if bar["timestamp"] + 5 * 60 <= now.timestamp()
     ]
-    recent = completed[-96:]
+    recent = completed[-288:]
     price = float(snapshot["price"])
     candle_open = datetime.fromisoformat(snapshot["candle_at"].replace("Z", "+00:00"))
-    candle_close = candle_open.timestamp() + 30 * 60
+    candle_close = candle_open.timestamp() + 5 * 60
     candle_age_minutes = max(0, int((now.timestamp() - candle_close) / 60))
-    if candle_age_minutes > 35:
+    if candle_age_minutes > 15:
         raise ValueError("بيانات الشمعة قديمة؛ لا يُرسل تقرير بأسعار غير حديثة")
     oman_close = datetime.fromtimestamp(candle_close, timezone.utc).astimezone(
         __import__("datetime").timezone(__import__("datetime").timedelta(hours=4))
@@ -655,8 +675,8 @@ def build_market_report(candles, snapshot):
     rsi_text = f"{float(rsi):.1f}" if rsi is not None else "غير متاح"
     return (
         "📊 تقرير الذهب الدوري — XAU/USD\n"
-        "الإطار: 30 دقيقة | التقرير بعد إغلاق شمعة جديدة\n"
-        f"إغلاق آخر شمعة: {price:.2f} دولار (Twelve Data)\n"
+        "الإطار: M5 / M15 / H1 / H4 | التقرير بعد إغلاق شمعة جديدة\n"
+        f"إغلاق آخر شمعة: {price:.2f} دولار (XAUS chart OHLC)\n"
         f"وقت الإغلاق بتوقيت عُمان: {oman_close} | عمر البيانات: {candle_age_minutes} دقيقة\n"
         "هذا سعر إغلاق شمعة، وليس سعر XTB اللحظي أو سعر تنفيذ.\n"
         f"الاتجاه: {direction}\n"
@@ -665,7 +685,7 @@ def build_market_report(candles, snapshot):
         f"منطقة المراقبة: {watch}\n"
         f"EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | EMA200: {ema200:.2f} | RSI: {rsi_text}\n"
         f"ملاحظة: {condition}\n"
-        "الأسعار والمناطق من Twelve Data وقد تختلف عن XTB؛ تحقق من Bid/Ask على XTB قبل أي تنفيذ.\n"
+        "الأسعار والمناطق من XAUS chart OHLC وقد تختلف عن XTB؛ تحقق من Bid/Ask على XTB قبل أي تنفيذ.\n"
         "لا توجد توصية دخول مؤكدة في هذا التقرير؛ إشارات الاستراتيجية الأصلية تصلك برسالة مستقلة عند تحقق شروطها.\n"
         f"وقت الشمعة: {candle_time}\n"
         "تحليل فني احتمالي، وليس ضماناً للربح. تحقق من السعر والسبريد قبل أي قرار."
@@ -705,25 +725,76 @@ def deliver_pending_market_reports(limit: int = 5):
 
 def run_engine_once():
     global ENGINE_STATE
-    candles = fetch_candles()
-    snapshot, raw_signal = analyze_latest_closed_candle(candles)
+    previous_candle = ENGINE_STATE.get("last_candle")
+    market_data = fetch_market_data()
+    candles = market_data["m5"]
+    snapshot, raw_signal = analyze_mtf(market_data, time.time())
+    structure_signal = analyze_structure(market_data, time.time(), snapshot)
+    if structure_signal is not None:
+        raw_signal = structure_signal
+    if raw_signal is None:
+        scalp_signal = analyze_scalp(market_data, time.time(), snapshot)
+        if scalp_signal is not None:
+            raw_signal = scalp_signal
+            snapshot["setup"] = "SCALP_5M"
+            snapshot["scalp_quality"] = scalp_signal.get("quality_score")
+    if snapshot["candle_at"] != previous_candle:
+        print(
+            "MARKET_ENGINE_OK "
+            f"candle_source={snapshot['source']} close={snapshot['price']:.3f} "
+            f"live_source={snapshot.get('live_price_source')} live_mid={snapshot.get('live_price')} "
+            f"live_age_seconds={snapshot.get('live_price_age_seconds')} "
+            f"M5={len(market_data['m5'])} M15={len(market_data['m15'])} "
+            f"H1={len(market_data['h1'])} H4={len(market_data['h4'])} "
+            f"candle_age_seconds={snapshot['candle_age_seconds']}",
+            flush=True,
+        )
     ENGINE_STATE = {
         "status": "online",
         "message": "محرك التحليل يعمل — بانتظار تحقق شروط الإشارة" if not raw_signal else f"تم رصد إشارة {raw_signal['side']}",
         "source": snapshot["source"],
+        "live_price_source": snapshot.get("live_price_source"),
+        "live_price": snapshot.get("live_price"),
+        "live_price_age_seconds": snapshot.get("live_price_age_seconds"),
+        "live_bid": snapshot.get("live_bid"),
+        "live_ask": snapshot.get("live_ask"),
         "timeframe": snapshot["timeframe"],
         "price": snapshot["price"],
         "last_candle": snapshot["candle_at"],
         "last_checked": snapshot["checked_at"],
         "last_error": None,
-        "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup")},
+        "indicators": {k: snapshot.get(k) for k in ("ema20", "ema50", "ema200", "rsi14", "atr14", "quality_score", "higher_timeframe_bias", "setup", "scalp_quality")},
     }
 
-    if snapshot["candle_age_seconds"] <= 35 * 60:
-        queue_market_report(snapshot["candle_at"], build_market_report(candles, snapshot))
+    # Schedule by UTC half-hour bucket, even if the exact boundary candle was missed.
+    if 0 <= snapshot["candle_age_seconds"] <= 10 * 60:
+        report_time = datetime.fromtimestamp(
+            int(datetime.now(timezone.utc).timestamp()) // 1800 * 1800, timezone.utc
+        ).isoformat()
+        queue_market_report(report_time, build_market_report(candles, snapshot))
     deliver_pending_market_reports()
-    signal = Signal(**raw_signal) if raw_signal else None
-    rr = validate_signal(signal) if signal else None
+    signal = None
+    rr = None
+    if raw_signal:
+        try:
+            signal = Signal(**raw_signal)
+            rr = validate_signal(signal)
+        except (ValidationError, HTTPException, ValueError) as exc:
+            entry = float(raw_signal.get("entry") or 0)
+            stop = float(raw_signal.get("stop_loss") or 0)
+            target = float(raw_signal.get("take_profit") or 0)
+            risk = abs(entry - stop)
+            reward = abs(target - entry)
+            rejected_rr = reward / risk if risk > 0 else 0.0
+            print(
+                "SIGNAL_REJECTED "
+                f"side={raw_signal.get('side')} entry={entry:.5f} "
+                f"stop={stop:.5f} target={target:.5f} rr={rejected_rr:.5f} "
+                f"reason={type(exc).__name__}: {str(exc)[:180]}",
+                flush=True,
+            )
+            signal = None
+            rr = None
     persist_engine_result(
         snapshot["candle_at"], signal, rr, snapshot["source"],
         retry_pending=bool(snapshot.get("entry_pending", False)),
@@ -739,12 +810,16 @@ async def engine_loop():
         try:
             await asyncio.to_thread(run_engine_once)
         except Exception as exc:
+            safe_error = f"{type(exc).__name__}: {str(exc)}"[:300]
             ENGINE_STATE.update({
                 "status": "error",
                 "message": "تعذر تحديث بيانات الذهب — سيُعاد المحاولة تلقائياً",
-                "last_error": str(exc)[:300],
+                "last_error": safe_error,
                 "last_checked": datetime.now(timezone.utc).isoformat(),
             })
+            # Render application logs are the source of truth for diagnosing provider failures.
+            # Never log request URLs or API credentials.
+            print(f"MARKET_ENGINE_ERROR {safe_error}", flush=True)
             # Retry the durable notification queue even while market data is unavailable.
             try:
                 await asyncio.to_thread(deliver_pending_notifications)
@@ -865,7 +940,7 @@ def health():
     return {
         "ok": True,
         "service": "Gold AI Assistant",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "engine": ENGINE_STATE["status"],
         "notifications_pending": pending_notification_count(),
     }

@@ -1,0 +1,44 @@
+name: Historical XAUUSD backtest
+# Research-only run uses chunked public M5 history and an extended H1 window.
+
+on:
+  push:
+    branches: ["feature/multi-timeframe-engine"]
+    paths:
+      - "app/backtest_mtf.py"
+      - "app/backtest_data.py"
+      - "scripts/run_historical_backtest.py"
+      - ".github/workflows/historical-backtest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q app scripts
+      - name: Fetch historical XAUUSD data and run backtest
+        env:
+          BACKTEST_ROUND_TURN_COST_R: "0"
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          python scripts/run_historical_backtest.py | tee reports/historical-backtest.txt
+      - name: Upload backtest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xauusd-historical-backtest
+          path: reports/historical-backtest.txt
+          if-no-files-found: ignore
+          retention-days: 14
