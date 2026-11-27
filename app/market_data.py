@@ -396,6 +396,26 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
         )
 
     h4_raw = resample_candles(h1_raw, HTF_SECONDS, 4 * HTF_SECONDS)
+    # If the provider's H1 grid is offset from UTC H4 boundaries, retain
+    # historical aligned H4 bars and add the latest complete rolling H4 bar.
+    # Never fabricate missing hours or accept an incomplete/stale bar.
+    recent = h1_closed[-4:]
+    if len(recent) == 4 and all(
+        recent[i]["timestamp"] - recent[i - 1]["timestamp"] == HTF_SECONDS
+        for i in range(1, 4)
+    ):
+        rolling = {
+            "timestamp": recent[0]["timestamp"],
+            "open": recent[0]["open"],
+            "high": max(b["high"] for b in recent),
+            "low": min(b["low"] for b in recent),
+            "close": recent[-1]["close"],
+            "volume": None,
+        }
+        h4_raw = sorted(
+            {b["timestamp"]: b for b in h4_raw + [rolling]}.values(),
+            key=lambda b: b["timestamp"],
+        )
     m15_closed = _closed_only(m15_raw, M15_SECONDS, now)
     h4_closed = _closed_only(h4_raw, 4 * HTF_SECONDS, now)
     if not m15_closed:
