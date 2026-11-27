@@ -416,7 +416,7 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
     if m15_age < 0 or m15_age > MAX_M15_AGE_SECONDS:
         raise MarketDataError("آخر شمعة M15 قديمة؛ أوقفنا الإشارات.")
     if h4_age < 0 or h4_age > MAX_H4_AGE_SECONDS:
-        raise MarketDataError(f"آخر شمعة H4 مشتقة قديمة ({int(h4_age)} ثانية؛ آخر إغلاق {h4_closed[-1][\'timestamp\'] + 4 * HTF_SECONDS})؛ أوقفنا الإشارات.")
+        raise MarketDataError("آخر شمعة H4 مشتقة قديمة؛ أوقفنا الإشارات.")
     if len(m15_closed) < MIN_M15_CANDLES:
         raise MarketDataError(
             f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج {MIN_M15_CANDLES}."
