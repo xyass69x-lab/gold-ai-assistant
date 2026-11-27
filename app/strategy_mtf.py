@@ -94,6 +94,7 @@ def analyze_mtf(data, now):
 
     setup_bar = m15_closed[-1]
     setup_close_time = int(setup_bar["timestamp"]) + 900
+    h4_bias = _bias(data["h4"], setup_close_time, 14400)
     h1_bias = _bias(h1, setup_close_time, 3600)
     d1_bias = _bias(d1_closed, setup_close_time, 86400)
 
@@ -115,7 +116,7 @@ def analyze_mtf(data, now):
         "live_price_age_seconds": (data.get("live_quote") or {}).get("age_seconds"),
         "live_bid": (data.get("live_quote") or {}).get("bid"),
         "live_ask": (data.get("live_quote") or {}).get("ask"),
-        "timeframe": "M1/M5/M15/H1/D1",
+        "timeframe": "M1/M5/M15/H1/H4/D1",
         "price": last_m5["close"],
         "candle_at": __import__("datetime").datetime.fromtimestamp(
             last_m5["timestamp"], __import__("datetime").timezone.utc
@@ -126,7 +127,7 @@ def analyze_mtf(data, now):
         "candle_age_seconds": data["m5_age_seconds"],
         "m1_close": m1_closed[-1]["close"] if m1_closed else None,
         "m1_age_seconds": data.get("m1_age_seconds"),
-        "higher_timeframe_bias": {"h1": h1_bias, "d1": d1_bias},
+        "higher_timeframe_bias": {"h1": h1_bias, "h4": h4_bias, "d1": d1_bias},
     }
 
     values = (e20[i], e50[i], e200[i], rsi_values[i], m15_atr, m5_atr)
@@ -144,7 +145,7 @@ def analyze_mtf(data, now):
 
     opposing = "BEARISH" if side == "BUY" else "BULLISH"
     agreeing = "BULLISH" if side == "BUY" else "BEARISH"
-    if d1_bias in (opposing, "UNAVAILABLE") or h1_bias in (opposing, "UNAVAILABLE") or h1_bias != agreeing:
+    if h4_bias in (opposing, "UNAVAILABLE") or d1_bias in (opposing, "UNAVAILABLE") or h1_bias in (opposing, "UNAVAILABLE") or h1_bias != agreeing:
         snapshot["setup"] = None
         return snapshot, None
 
