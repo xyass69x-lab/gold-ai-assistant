@@ -82,7 +82,7 @@ def _bias(candles, close_time, seconds):
 
 def analyze_mtf(data, now):
     """Return (snapshot, signal); no signal unless every timeframe is valid."""
-    m5, m15, h1, h4 = (data[k] for k in ("m5", "m15", "h1", "h4"))
+    m5, m15, h1, _unused = (data[k] for k in ("m5", "m15", "h1"))
     m1_closed = [b for b in data.get("m1", []) if int(b["timestamp"]) + 60 <= now]
     d1_closed = [b for b in data["d1"] if int(b["timestamp"]) + 86400 <= now]
     if len(d1_closed) < 50:
@@ -95,7 +95,6 @@ def analyze_mtf(data, now):
     setup_bar = m15_closed[-1]
     setup_close_time = int(setup_bar["timestamp"]) + 900
     h1_bias = _bias(h1, setup_close_time, 3600)
-    h4_bias = _bias(h4, setup_close_time, 14400)
     d1_bias = _bias(d1_closed, setup_close_time, 86400)
 
     closes = [bar["close"] for bar in m15_closed]
@@ -116,7 +115,7 @@ def analyze_mtf(data, now):
         "live_price_age_seconds": (data.get("live_quote") or {}).get("age_seconds"),
         "live_bid": (data.get("live_quote") or {}).get("bid"),
         "live_ask": (data.get("live_quote") or {}).get("ask"),
-        "timeframe": "M1/M5/M15/H1/H4/D1",
+        "timeframe": "M1/M5/M15/H1/D1",
         "price": last_m5["close"],
         "candle_at": __import__("datetime").datetime.fromtimestamp(
             last_m5["timestamp"], __import__("datetime").timezone.utc
@@ -127,7 +126,7 @@ def analyze_mtf(data, now):
         "candle_age_seconds": data["m5_age_seconds"],
         "m1_close": m1_closed[-1]["close"] if m1_closed else None,
         "m1_age_seconds": data.get("m1_age_seconds"),
-        "higher_timeframe_bias": {"h1": h1_bias, "h4": h4_bias, "d1": d1_bias},
+        "higher_timeframe_bias": {"h1": h1_bias, "d1": d1_bias},
     }
 
     values = (e20[i], e50[i], e200[i], rsi_values[i], m15_atr, m5_atr)
@@ -145,7 +144,7 @@ def analyze_mtf(data, now):
 
     opposing = "BEARISH" if side == "BUY" else "BULLISH"
     agreeing = "BULLISH" if side == "BUY" else "BEARISH"
-    if d1_bias in (opposing, "UNAVAILABLE") or h1_bias in (opposing, "UNAVAILABLE") or h4_bias in (opposing, "UNAVAILABLE") or agreeing not in (h1_bias, h4_bias):
+    if d1_bias in (opposing, "UNAVAILABLE") or h1_bias in (opposing, "UNAVAILABLE") or h1_bias != agreeing:
         snapshot["setup"] = None
         return snapshot, None
 
@@ -204,7 +203,7 @@ def analyze_mtf(data, now):
     m15_ema_stack = direction * (e20[i] - e50[i]) / m15_atr
     m15_structure_points = 10.0 * clamp01(m15_ema_stack / 0.35)
 
-    htf_points = 20.0 if h1_bias == agreeing and h4_bias == agreeing else 12.0
+    htf_points = 20.0 if h1_bias == agreeing else 12.0
 
     if setup == "PULLBACK":
         touch_distance = (
@@ -236,7 +235,7 @@ def analyze_mtf(data, now):
     raw_parts = {
         "trend_strength_and_slope": trend_points,
         "m15_ema_structure": m15_structure_points,
-        "h1_h4_alignment": htf_points,
+        "h1_alignment": htf_points,
         "m15_setup_quality": setup_points,
         "m5_trigger_strength": trigger_points,
         "rsi_position": rsi_points,
@@ -306,10 +305,10 @@ def analyze_mtf(data, now):
     return snapshot, {
         "symbol": "XAUUSD", "side": side, "entry": entry_out,
         "stop_loss": round(stop, 4), "take_profit_1": round(tp1, 4),
-        "take_profit": round(tp2, 4), "timeframe": "M1/M5/M15/H1/H4/D1",
+        "take_profit": round(tp2, 4), "timeframe": "M1/M5/M15/H1/D1",
         "confidence": score,
         "reason": (
-            f"{setup} على M15؛ اتجاه H1={h1_bias} وH4={h4_bias}؛ "
+            f"{setup} على M15؛ اتجاه H1={h1_bias}؛ "
             f"تأكيد دخول M5؛ جودة فنية {score}/100 (ليست احتمال ربح)"
         ),
     }
