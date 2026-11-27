@@ -395,25 +395,13 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
             f"بيانات H1 غير كافية: {len(h1_closed)} شمعة، نحتاج {MIN_H1_CANDLES}."
         )
 
+    # Build H4 directly from the fresh, closed M5 feed. This avoids
+    # incompatible H1 timestamp grids and stale historical H4 tails.
     h4_raw = resample_candles(h1_raw, HTF_SECONDS, 4 * HTF_SECONDS)
-    # If the provider's H1 grid is offset from UTC H4 boundaries, retain
-    # historical aligned H4 bars and add the latest complete rolling H4 bar.
-    # Never fabricate missing hours or accept an incomplete/stale bar.
-    recent = h1_closed[-4:]
-    if len(recent) == 4 and all(
-        recent[i]["timestamp"] - recent[i - 1]["timestamp"] == HTF_SECONDS
-        for i in range(1, 4)
-    ):
-        rolling = {
-            "timestamp": recent[0]["timestamp"],
-            "open": recent[0]["open"],
-            "high": max(b["high"] for b in recent),
-            "low": min(b["low"] for b in recent),
-            "close": recent[-1]["close"],
-            "volume": None,
-        }
+    if use_biquote_m5:
+        live_h4 = resample_candles(m5_closed, BASE_SECONDS, 4 * HTF_SECONDS)
         h4_raw = sorted(
-            {b["timestamp"]: b for b in h4_raw + [rolling]}.values(),
+            {b["timestamp"]: b for b in h4_raw + live_h4}.values(),
             key=lambda b: b["timestamp"],
         )
     m15_closed = _closed_only(m15_raw, M15_SECONDS, now)
@@ -428,7 +416,7 @@ def fetch_market_data(force_refresh=False, now=None, include_live_quote=True, us
     if m15_age < 0 or m15_age > MAX_M15_AGE_SECONDS:
         raise MarketDataError("آخر شمعة M15 قديمة؛ أوقفنا الإشارات.")
     if h4_age < 0 or h4_age > MAX_H4_AGE_SECONDS:
-        raise MarketDataError("آخر شمعة H4 مشتقة قديمة؛ أوقفنا الإشارات.")
+        raise MarketDataError(f"آخر شمعة H4 مشتقة قديمة ({int(h4_age)} ثانية؛ آخر إغلاق {h4_closed[-1][\'timestamp\'] + 4 * HTF_SECONDS})؛ أوقفنا الإشارات.")
     if len(m15_closed) < MIN_M15_CANDLES:
         raise MarketDataError(
             f"بيانات M15 غير كافية: {len(m15_closed)} شمعة، نحتاج {MIN_M15_CANDLES}."
