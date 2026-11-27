@@ -83,7 +83,7 @@ def _bias(candles, close_time, seconds):
 def analyze_mtf(data, now):
     """Return (snapshot, signal); no signal unless every timeframe is valid."""
     m5, m15, h1, h4 = (data[k] for k in ("m5", "m15", "h1", "h4"))
-    m1_closed = [b for b in data["m1"] if int(b["timestamp"]) + 60 <= now]
+    m1_closed = [b for b in data.get("m1", []) if int(b["timestamp"]) + 60 <= now]
     d1_closed = [b for b in data["d1"] if int(b["timestamp"]) + 86400 <= now]
     if len(d1_closed) < 50:
         raise ValueError("شموع M1/D1 غير كافية")
@@ -126,7 +126,7 @@ def analyze_mtf(data, now):
         "rsi14": rsi_values[i], "atr14": m15_atr,
         "candle_age_seconds": data["m5_age_seconds"],
         "m1_close": m1_closed[-1]["close"] if m1_closed else None,
-        "m1_age_seconds": data["m1_age_seconds"],
+        "m1_age_seconds": data.get("m1_age_seconds"),
         "higher_timeframe_bias": {"h1": h1_bias, "h4": h4_bias, "d1": d1_bias},
     }
 
